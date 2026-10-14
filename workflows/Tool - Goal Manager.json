@@ -1,0 +1,326 @@
+{
+  "name": "Tool - Goal Manager",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5f0f3277-ac2f-4a69-8987-0324ebb6a03a",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Goals",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "93d2b9ee-eacc-4209-bf96-5e92d82251b9",
+      "name": "Read Goals Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -656,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Execute Workflow Trigger').first().json || {};\nconst sheetRows = $input.all();\n\n// 1. Resilient input extraction (supports nested query or flat parameters)\nconst queryObj = triggerData.query || {};\nconst action = (triggerData.action || queryObj.action || 'list').toLowerCase().trim();\nconst sheetId = triggerData.sheetId || queryObj.sheetId || '';\nconst goalNameInput = (triggerData.name || triggerData.goalName || queryObj.name || queryObj.goalName || triggerData.goal || queryObj.goal || '').trim();\nconst goalIdInput = (triggerData.goalId || queryObj.goalId || '').trim();\nconst targetAmountRaw = triggerData.targetAmount !== undefined ? triggerData.targetAmount : (queryObj.targetAmount !== undefined ? queryObj.targetAmount : (triggerData.amount || queryObj.amount));\nconst targetAmount = targetAmountRaw !== undefined && targetAmountRaw !== null ? parseFloat(targetAmountRaw) : null;\nconst currentSavedRaw = triggerData.currentSaved !== undefined ? triggerData.currentSaved : queryObj.currentSaved;\nconst initialSaved = currentSavedRaw !== undefined && currentSavedRaw !== null ? parseFloat(currentSavedRaw) : 0;\nconst amountToAddRaw = triggerData.amountToAdd !== undefined ? triggerData.amountToAdd : (queryObj.amountToAdd !== undefined ? queryObj.amountToAdd : (triggerData.saved || queryObj.saved));\nconst amountToAdd = amountToAddRaw !== undefined && amountToAddRaw !== null ? parseFloat(amountToAddRaw) : 0;\nconst targetDateInput = triggerData.targetDate || queryObj.targetDate || triggerData.deadline || queryObj.deadline || '';\nconst notesInput = triggerData.notes || queryObj.notes || '';\nconst statusInput = triggerData.status || queryObj.status || 'active';\n\n// 2. Check if sheet read threw an error (e.g. Goals tab missing)\nconst firstItem = sheetRows[0]?.json || {};\nif (firstItem.error) {\n  return [{\n    json: {\n      operationType: 'read_only',\n      success: false,\n      status: 'SHEET_TAB_NOT_FOUND',\n      response: \"⚠️ The 'Goals' tab was not found in your Google Sheet. Please ensure a tab named 'Goals' exists with columns: goalId, name, targetAmount, currentSaved, monthlyContribution, targetDate, status, lastMilestone, createdAt, updatedAt, notes.\",\n      error: firstItem.error\n    }\n  }];\n}\n\n// 3. Filter valid active goals from sheet\nconst existingGoals = sheetRows\n  .map(r => r.json)\n  .filter(g => g && g.name && g.targetAmount !== undefined && g.row_number !== undefined);\n\n// Helper: Calculate deterministic metrics\nfunction calculateGoalMetrics(targetAmt, currSaved, tgtDateStr) {\n  const now = new Date();\n  const target = Math.max(0, parseFloat(targetAmt) || 0);\n  const saved = Math.max(0, parseFloat(currSaved) || 0);\n  const remaining = Math.max(0, target - saved);\n  \n  let monthsRemaining = 6; // sensible default if no date specified\n  if (tgtDateStr) {\n    const tDate = new Date(tgtDateStr);\n    if (!isNaN(tDate.getTime())) {\n      const diffDays = Math.max(0, (tDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));\n      monthsRemaining = Math.max(1, Math.ceil(diffDays / 30.4375));\n    }\n  }\n  \n  const monthlyContribution = remaining > 0 ? Math.round(remaining / monthsRemaining) : 0;\n  const percentage = target > 0 ? Math.min(100, Math.round((saved / target) * 100)) : 0;\n  \n  return { target, saved, remaining, monthsRemaining, monthlyContribution, percentage };\n}\n\n// Helper: Evaluate milestone crossing (25%, 50%, 75%, 100%)\nfunction evaluateMilestone(priorMilestone, currentPercentage, name, saved, target) {\n  const prior = parseFloat(priorMilestone) || 0;\n  let achieved = 0;\n  if (currentPercentage >= 100) achieved = 100;\n  else if (currentPercentage >= 75) achieved = 75;\n  else if (currentPercentage >= 50) achieved = 50;\n  else if (currentPercentage >= 25) achieved = 25;\n  \n  if (achieved > prior) {\n    let alertMsg = '';\n    if (achieved === 100) {\n      alertMsg = `🎯 GOAL COMPLETED! Congratulations, you have fully reached 100% of your \"${name}\" goal (₹${saved.toLocaleString('en-IN')} / ₹${target.toLocaleString('en-IN')})! 🚀🎉`;\n    } else {\n      alertMsg = `🎯 Milestone Reached! You have completed ${achieved}% of your \"${name}\" goal (₹${saved.toLocaleString('en-IN')} / ₹${target.toLocaleString('en-IN')} saved). Keep it up! 💪✨`;\n    }\n    return { milestoneCrossed: achieved, newLastMilestone: achieved, milestoneAlert: alertMsg };\n  }\n  return { milestoneCrossed: null, newLastMilestone: prior, milestoneAlert: null };\n}\n\n// 4. Dispatch Actions\n\n// ACTION: CREATE\nif (action === 'create' || action === 'add' || action === 'set') {\n  if (!goalNameInput) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'MISSING_NAME',\n        response: '⚠️ Please specify a name for the goal (e.g., \"Emergency Fund\", \"MacBook\").'\n      }\n    }];\n  }\n  if (!targetAmount || targetAmount <= 0) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'INVALID_AMOUNT',\n        response: '⚠️ Please provide a valid target amount greater than 0.'\n      }\n    }];\n  }\n  \n  // Check if a goal with exact same name already exists\n  const duplicate = existingGoals.find(g => (g.name || '').toLowerCase() === goalNameInput.toLowerCase() && g.status !== 'cancelled');\n  if (duplicate) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'ALREADY_EXISTS',\n        response: `⚠️ A goal named \"${goalNameInput}\" already exists with target ₹${duplicate.targetAmount} (Saved: ₹${duplicate.currentSaved || 0}). Use 'add_savings' to contribute or update it.`\n      }\n    }];\n  }\n  \n  const nowIso = new Date().toISOString();\n  const metrics = calculateGoalMetrics(targetAmount, initialSaved, targetDateInput);\n  const milestoneResult = evaluateMilestone(0, metrics.percentage, goalNameInput, metrics.saved, metrics.target);\n  const newGoalId = `goal_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;\n  \n  const newRow = {\n    goalId: newGoalId,\n    name: goalNameInput,\n    targetAmount: metrics.target,\n    currentSaved: metrics.saved,\n    monthlyContribution: metrics.monthlyContribution,\n    targetDate: targetDateInput || '',\n    status: metrics.saved >= metrics.target ? 'completed' : 'active',\n    lastMilestone: milestoneResult.newLastMilestone,\n    createdAt: nowIso,\n    updatedAt: nowIso,\n    notes: notesInput\n  };\n  \n  let respMsg = `🎯 Goal Created: \"${goalNameInput}\" with target ₹${metrics.target.toLocaleString('en-IN')}`;\n  if (targetDateInput) respMsg += ` by ${targetDateInput}`;\n  respMsg += `.\\nMonthly contribution required: ₹${metrics.monthlyContribution.toLocaleString('en-IN')}/month (${metrics.monthsRemaining} months). Current progress: ${metrics.percentage}% (₹${metrics.saved.toLocaleString('en-IN')}).`;\n  if (milestoneResult.milestoneAlert) respMsg += `\\n\\n${milestoneResult.milestoneAlert}`;\n  \n  return [{\n    json: {\n      operationType: 'append',\n      sheetId,\n      goal: newRow,\n      response: respMsg,\n      milestoneAlert: milestoneResult.milestoneAlert,\n      ...newRow\n    }\n  }];\n}\n\n// ACTION: ADD_SAVINGS (Update progress)\nif (action === 'add_savings' || action === 'contribute' || action === 'deposit' || action === 'save') {\n  if (amountToAdd <= 0) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'INVALID_AMOUNT',\n        response: '⚠️ Please provide an amount to add greater than 0.'\n      }\n    }];\n  }\n  \n  // Pinpoint goal\n  let matchedGoal = null;\n  if (goalIdInput) {\n    matchedGoal = existingGoals.find(g => g.goalId === goalIdInput);\n  } else if (goalNameInput) {\n    const cleanSearch = goalNameInput.toLowerCase();\n    matchedGoal = existingGoals.find(g => (g.name || '').toLowerCase() === cleanSearch) ||\n                  existingGoals.find(g => (g.name || '').toLowerCase().includes(cleanSearch));\n  } else if (existingGoals.length === 1) {\n    matchedGoal = existingGoals[0];\n  }\n  \n  if (!matchedGoal) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'GOAL_NOT_FOUND',\n        response: `⚠️ Could not find an active goal matching \"${goalNameInput || 'your query'}\". Please check your active goals!`\n      }\n    }];\n  }\n  \n  const prevSaved = parseFloat(matchedGoal.currentSaved) || 0;\n  const newSaved = prevSaved + amountToAdd;\n  const tgtAmount = parseFloat(matchedGoal.targetAmount) || 0;\n  const tgtDate = matchedGoal.targetDate || '';\n  \n  const metrics = calculateGoalMetrics(tgtAmount, newSaved, tgtDate);\n  const milestoneResult = evaluateMilestone(matchedGoal.lastMilestone || 0, metrics.percentage, matchedGoal.name, metrics.saved, metrics.target);\n  \n  const updatedStatus = metrics.saved >= metrics.target ? 'completed' : (matchedGoal.status || 'active');\n  const nowIso = new Date().toISOString();\n  \n  const updatedRow = {\n    row_number: matchedGoal.row_number,\n    goalId: matchedGoal.goalId,\n    name: matchedGoal.name,\n    targetAmount: metrics.target,\n    currentSaved: metrics.saved,\n    monthlyContribution: metrics.monthlyContribution,\n    targetDate: tgtDate,\n    status: updatedStatus,\n    lastMilestone: milestoneResult.newLastMilestone,\n    createdAt: matchedGoal.createdAt || nowIso,\n    updatedAt: nowIso,\n    notes: notesInput || matchedGoal.notes || ''\n  };\n  \n  let respMsg = `💰 Added ₹${amountToAdd.toLocaleString('en-IN')} to \"${matchedGoal.name}\"! Total saved: ₹${metrics.saved.toLocaleString('en-IN')} / ₹${metrics.target.toLocaleString('en-IN')} (${metrics.percentage}%).\\nMonthly contribution needed now: ₹${metrics.monthlyContribution.toLocaleString('en-IN')}/mo.`;\n  if (milestoneResult.milestoneAlert) respMsg += `\\n\\n${milestoneResult.milestoneAlert}`;\n  \n  return [{\n    json: {\n      operationType: 'update',\n      sheetId,\n      row_number: matchedGoal.row_number,\n      goal: updatedRow,\n      response: respMsg,\n      milestoneAlert: milestoneResult.milestoneAlert,\n      ...updatedRow\n    }\n  }];\n}\n\n// ACTION: LIST or GET\nif (action === 'list' || action === 'get' || action === 'show' || action === 'query') {\n  const activeGoals = existingGoals.filter(g => g.status !== 'cancelled');\n  if (activeGoals.length === 0) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: true,\n        status: 'EMPTY',\n        response: \"You don't have any financial goals set up yet. You can create one anytime by saying: 'Create goal: Laptop ₹60,000 by December'!\",\n        goals: []\n      }\n    }];\n  }\n  \n  let summaryStr = `🎯 Here are your financial goals (${activeGoals.length} total):\\n\\n`;\n  const enrichedGoals = activeGoals.map(g => {\n    const metrics = calculateGoalMetrics(g.targetAmount, g.currentSaved, g.targetDate);\n    const statusIcon = g.status === 'completed' ? '✅' : '⏳';\n    summaryStr += `${statusIcon} **${g.name}**: ₹${metrics.saved.toLocaleString('en-IN')} / ₹${metrics.target.toLocaleString('en-IN')} (${metrics.percentage}%)\\n`;\n    if (g.targetDate) summaryStr += `  • Target: ${g.targetDate} (${metrics.monthsRemaining} months left)\\n`;\n    if (metrics.remaining > 0) summaryStr += `  • Monthly contribution needed: ₹${metrics.monthlyContribution.toLocaleString('en-IN')}/mo\\n`;\n    else summaryStr += `  • Goal achieved! 🎉\\n`;\n    summaryStr += `\\n`;\n    return { ...g, ...metrics };\n  });\n  \n  return [{\n    json: {\n      operationType: 'read_only',\n      success: true,\n      status: 'SUCCESS',\n      response: summaryStr.trim(),\n      goals: enrichedGoals\n    }\n  }];\n}\n\n// ACTION: CANCEL / DELETE\nif (action === 'delete' || action === 'cancel' || action === 'remove') {\n  let matchedGoal = null;\n  if (goalIdInput) matchedGoal = existingGoals.find(g => g.goalId === goalIdInput);\n  else if (goalNameInput) {\n    const clean = goalNameInput.toLowerCase();\n    matchedGoal = existingGoals.find(g => (g.name || '').toLowerCase() === clean) ||\n                  existingGoals.find(g => (g.name || '').toLowerCase().includes(clean));\n  }\n  \n  if (!matchedGoal) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'GOAL_NOT_FOUND',\n        response: `⚠️ Could not find any goal matching \"${goalNameInput || 'your query'}\" to delete.`\n      }\n    }];\n  }\n  \n  const updatedRow = {\n    row_number: matchedGoal.row_number,\n    goalId: matchedGoal.goalId,\n    name: matchedGoal.name,\n    targetAmount: matchedGoal.targetAmount,\n    currentSaved: matchedGoal.currentSaved,\n    monthlyContribution: 0,\n    targetDate: matchedGoal.targetDate || '',\n    status: 'cancelled',\n    lastMilestone: matchedGoal.lastMilestone || 0,\n    createdAt: matchedGoal.createdAt || new Date().toISOString(),\n    updatedAt: new Date().toISOString(),\n    notes: `[CANCELLED] ${matchedGoal.notes || ''}`\n  };\n  \n  return [{\n    json: {\n      operationType: 'update',\n      sheetId,\n      row_number: matchedGoal.row_number,\n      goal: updatedRow,\n      response: `Successfully cancelled the goal \"${matchedGoal.name}\".`,\n      ...updatedRow\n    }\n  }];\n}\n\n// Default fallback\nreturn [{\n  json: {\n    operationType: 'read_only',\n    success: false,\n    status: 'UNKNOWN_ACTION',\n    response: `Unknown action \"${action}\". Supported actions: create, add_savings, list, delete.`\n  }\n}];"
+      },
+      "id": "298b135f-1551-462f-a497-ddf92ac5e1b1",
+      "name": "Process Goal Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "append"
+            }
+          ]
+        }
+      },
+      "id": "9e9fc774-f27e-4e00-85ad-9cd50634530c",
+      "name": "Is Append?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Goals",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "7d7f383c-944d-481b-9ce6-9c11a3aeb61d",
+      "name": "Append Goal to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Goal Action').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'CREATED',\n    action: 'create',\n    response: proc.response,\n    milestoneAlert: proc.milestoneAlert,\n    goal: proc.goal\n  }\n};"
+      },
+      "id": "a49ac9f3-659a-44b1-a19c-3b0c99cce5c6",
+      "name": "Format Append Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "update"
+            }
+          ]
+        }
+      },
+      "id": "2ddcbee6-0261-4d7a-aa4a-e1cb2b03967a",
+      "name": "Is Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Goals",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6e404a8e-333e-4aab-98a7-5828b0dc79d0",
+      "name": "Update Goal in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        160
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Goal Action').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'UPDATED',\n    action: proc.action || 'update',\n    response: proc.response,\n    milestoneAlert: proc.milestoneAlert,\n    goal: proc.goal\n  }\n};"
+      },
+      "id": "e06b879b-0840-4cf1-af5d-0c6266cde487",
+      "name": "Format Update Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $input.first().json;\nreturn {\n  json: {\n    success: proc.success !== undefined ? proc.success : true,\n    status: proc.status || 'OK',\n    action: proc.action || 'list',\n    response: proc.response || 'Operation completed',\n    goals: proc.goals || [],\n    error: proc.error || null\n  }\n};"
+      },
+      "id": "28b38c77-3bb3-4b79-afff-17723ab085e8",
+      "name": "Format Read-Only Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Goals Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Goals Sheet": {
+      "main": [
+        [
+          {
+            "node": "Process Goal Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Goal Action": {
+      "main": [
+        [
+          {
+            "node": "Is Append?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Append?": {
+      "main": [
+        [
+          {
+            "node": "Append Goal to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Goal to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Append Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Update?": {
+      "main": [
+        [
+          {
+            "node": "Update Goal in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Read-Only Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Goal in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "aa32aabb-a2c9-4da9-a37a-dd5a3f71f43e",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "6HaQeRiApo9OQxy4",
+  "tags": []
+}

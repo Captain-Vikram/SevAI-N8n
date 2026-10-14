@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "name": "correct_or_delete_transaction",
+        "description": "Call this tool whenever the user wants to edit, update, correct, or delete a previously logged transaction. Examples: 'The sunscreen was 200 rupees not 240', 'Change my last transaction to 350', 'Delete the 1000 rupees to mom', 'Cancel my last transaction'.",
+        "workflowId": {
+          "__rl": true,
+          "value": "FwaNK3vfqeDnTvlR",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/FwaNK3vfqeDnTvlR",
+          "cachedResultName": "Tool - Correct Transaction"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\"update\", \"delete\"],\n      \"description\": \"Whether to update or delete the transaction\"\n    },\n    \"target\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"findLast\": { \"type\": \"boolean\", \"description\": \"Set true if user refers to their last or previous transaction\" },\n        \"oldAmount\": { \"type\": \"number\", \"description\": \"The previous amount to find (if mentioned)\" },\n        \"vendorOrItem\": { \"type\": \"string\", \"description\": \"The merchant, vendor, or item name (e.g. sunscreen, Swiggy, mom)\" }\n      },\n      \"description\": \"Details to pinpoint the exact transaction\"\n    },\n    \"newValues\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"amount\": { \"type\": \"number\", \"description\": \"The new corrected amount\" },\n        \"vendor\": { \"type\": \"string\", \"description\": \"The new corrected vendor or merchant\" },\n        \"category\": { \"type\": \"string\", \"description\": \"The new category\" }\n      },\n      \"description\": \"The new corrected values to apply when action is update\"\n    }\n  },\n  \"required\": [\"sheetId\", \"action\"]\n}"
+      },
+      "id": "e8f1c2d3-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+      "name": "Correct Or Delete Transaction Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2680,
+        464
+      ]
+    }
+  ],
+  "connections": {
+    "Correct Or Delete Transaction Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

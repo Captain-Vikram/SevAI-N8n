@@ -1,0 +1,329 @@
+{
+  "name": "Tool - Memory Service",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f6e8f4a0-6ee6-467d-b020-f05e91e94408",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Memories",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "aa20b020-e7be-4694-91b6-2ea3bc84042a",
+      "name": "Read Memories Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -672,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Execute Workflow Trigger').first().json || {};\nconst sheetRows = $input.all();\n\nconst queryObj = (triggerData.query && typeof triggerData.query === 'object') ? triggerData.query : {};\nconst action = String(triggerData.action || queryObj.action || 'retrieve').toLowerCase().trim();\nconst sheetId = String(triggerData.sheetId || queryObj.sheetId || '').trim();\nconst memoryIdInput = String(triggerData.memoryId || queryObj.memoryId || '').trim();\nconst memoryTypeInput = String(triggerData.memoryType || queryObj.memoryType || triggerData.type || queryObj.type || '').toLowerCase().trim();\nconst contentInput = String(triggerData.content || queryObj.content || triggerData.text || queryObj.text || '').trim();\n\nlet queryText = '';\nif (typeof triggerData.queryText === 'string') queryText = triggerData.queryText;\nelse if (typeof triggerData.search === 'string') queryText = triggerData.search;\nelse if (typeof queryObj.search === 'string') queryText = queryObj.search;\nelse if (typeof queryObj.query === 'string') queryText = queryObj.query;\nelse if (typeof triggerData.query === 'string') queryText = triggerData.query;\nqueryText = queryText.trim();\n\nlet topicInput = '';\nif (typeof triggerData.topic === 'string') topicInput = triggerData.topic;\nelse if (typeof queryObj.topic === 'string') topicInput = queryObj.topic;\nelse topicInput = queryText;\ntopicInput = topicInput.trim();\n\nconst statusInput = String(triggerData.status || queryObj.status || '').toLowerCase().trim();\nconst sourceTypeInput = String(triggerData.sourceType || queryObj.sourceType || 'user_explicit').trim();\nconst sourceMessageIdInput = String(triggerData.sourceMessageId || queryObj.sourceMessageId || '').trim();\nconst confidenceRaw = triggerData.confidence !== undefined ? triggerData.confidence : queryObj.confidence;\nconst confidence = confidenceRaw !== undefined && confidenceRaw !== null ? parseFloat(confidenceRaw) : (sourceTypeInput === 'user_explicit' ? 1.0 : 0.85);\n\nlet structuredVal = triggerData.structuredValue !== undefined ? triggerData.structuredValue : queryObj.structuredValue;\nlet structuredValStr = '';\nif (structuredVal) {\n  if (typeof structuredVal === 'object') {\n    try { structuredValStr = JSON.stringify(structuredVal); } catch (e) { structuredValStr = ''; }\n  } else {\n    structuredValStr = String(structuredVal);\n  }\n}\n\nconst limitRaw = triggerData.limit !== undefined ? triggerData.limit : queryObj.limit;\nconst limit = limitRaw ? parseInt(limitRaw, 10) : 10;\n\n// 1. Error Handling (Tab missing or API error)\nconst firstItem = sheetRows[0]?.json || {};\nif (firstItem.error) {\n  return [{\n    json: {\n      operationType: 'read_only',\n      success: false,\n      status: 'SHEET_TAB_NOT_FOUND',\n      response: \"⚠️ The 'Memories' tab was not found in your Google Sheet. Please add a tab named 'Memories' with columns: memoryId, memoryType, content, structuredValue, status, confidence, sourceMessageId, sourceType, createdAt, updatedAt, lastAccessedAt, embedding, schemaVersion.\",\n      error: firstItem.error\n    }\n  }];\n}\n\n// 2. Parse Existing Memories\nconst existingMemories = sheetRows\n  .map(r => r.json)\n  .filter(m => m && (m.memoryId || m.content) && m.row_number !== undefined);\n\nfunction formatMemorySummary(memoriesList) {\n  if (!memoriesList || memoriesList.length === 0) {\n    return \"No prior user memories or preferences recorded yet.\";\n  }\n  let summary = '🧠 **Remembered User Context & Preferences (' + memoriesList.length + ' items):**\\n';\n  for (const m of memoriesList) {\n    const typeTag = m.memoryType ? '[' + m.memoryType.toUpperCase() + ']' : '[NOTE]';\n    const scoreStr = m.retrievalMethod === 'semantic_cosine' ? ' (relevance: ' + Math.round(m.relevance * 100) + '%)' : '';\n    summary += '• ' + typeTag + ' ' + m.content + scoreStr + '\\n';\n  }\n  return summary.trim();\n}\n\n// Cosine Similarity between two embedding float arrays\nfunction cosineSimilarity(vecA, vecB) {\n  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;\n  let dotProduct = 0;\n  let normA = 0;\n  let normB = 0;\n  for (let i = 0; i < vecA.length; i++) {\n    dotProduct += vecA[i] * vecB[i];\n    normA += vecA[i] * vecA[i];\n    normB += vecB[i] * vecB[i];\n  }\n  if (normA === 0 || normB === 0) return 0;\n  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));\n}\n\n// Fallback keyword relevance score (normalized to 0..1)\nfunction scoreKeywordRelevance(content, queryStr) {\n  if (!queryStr) return 1.0;\n  const tokens = queryStr.toLowerCase().split(/\\s+/).filter(t => t.length > 2);\n  if (tokens.length === 0) return 1.0;\n  const lowerContent = (content || '').toLowerCase();\n  let matches = 0;\n  for (const t of tokens) {\n    if (lowerContent.includes(t)) matches += 1;\n  }\n  return matches / tokens.length;\n}\n\n// Helper: fetch embedding from local LM Studio text-embedding-nomic-embed-text-v1.5\nasync function fetchEmbedding(text) {\n  if (!text || typeof text !== 'string' || text.trim().length === 0) return null;\n  const configuredHost = (typeof process !== 'undefined' && (process.env.LM_STUDIO_HOST || process.env.EMBEDDING_HOST)) || '';\n  const hosts = [\n    ...(configuredHost ? [configuredHost] : []),\n    'http://192.168.29.141:1234',\n    'http://127.0.0.1:1234',\n    'http://host.docker.internal:1234'\n  ];\n  \n  const payload = {\n    model: 'text-embedding-nomic-embed-text-v1.5',\n    input: text.trim()\n  };\n\n  for (const host of hosts) {\n    try {\n      if (typeof $httpRequest === 'function') {\n        const res = await $httpRequest({\n          method: 'POST',\n          url: host + '/v1/embeddings',\n          body: payload,\n          json: true,\n          timeout: 2500\n        });\n        if (res && res.data && res.data[0] && Array.isArray(res.data[0].embedding)) {\n          return res.data[0].embedding;\n        }\n      } else if (typeof this !== 'undefined' && this.helpers && typeof this.helpers.httpRequest === 'function') {\n        const res = await this.helpers.httpRequest({\n          method: 'POST',\n          url: host + '/v1/embeddings',\n          body: payload,\n          json: true,\n          timeout: 2500\n        });\n        if (res && res.data && res.data[0] && Array.isArray(res.data[0].embedding)) {\n          return res.data[0].embedding;\n        }\n      } else if (typeof fetch === 'function') {\n        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;\n        const timer = controller ? setTimeout(() => controller.abort(), 2500) : null;\n        const res = await fetch(host + '/v1/embeddings', {\n          method: 'POST',\n          headers: { 'Content-Type': 'application/json' },\n          body: JSON.stringify(payload),\n          signal: controller ? controller.signal : undefined\n        });\n        if (timer) clearTimeout(timer);\n        if (res.ok) {\n          const data = await res.json();\n          if (data && data.data && data.data[0] && Array.isArray(data.data[0].embedding)) {\n            return data.data[0].embedding;\n          }\n        }\n      }\n    } catch (e) {}\n  }\n  return null;\n}\n\nfunction generateMemoryId() {\n  return 'mem_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);\n}\n\nconst nowIso = new Date().toISOString();\n\n// ACTION: WRITE / RECORD / ADD\nif (action === 'write' || action === 'add' || action === 'save' || action === 'record' || action === 'create') {\n  if (!contentInput) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'MISSING_CONTENT',\n        response: '⚠️ Content is required to store a memory.'\n      }\n    }];\n  }\n\n  const assignedType = memoryTypeInput || 'profile';\n  const cleanNewContent = contentInput.toLowerCase().trim();\n\n  // Duplicate / Idempotency check\n  const existingDuplicate = existingMemories.find(m => {\n    if (m.status !== 'active') return false;\n    const cleanExisting = (m.content || '').toLowerCase().trim();\n    return cleanExisting === cleanNewContent;\n  });\n\n  // Generate embedding using nomic-embed-text\n  const embVector = await fetchEmbedding(contentInput);\n  const embString = embVector ? JSON.stringify(embVector) : '';\n\n  if (existingDuplicate) {\n    const updatedRow = {\n      row_number: existingDuplicate.row_number,\n      memoryId: existingDuplicate.memoryId,\n      memoryType: assignedType || existingDuplicate.memoryType,\n      content: contentInput,\n      structuredValue: structuredValStr || existingDuplicate.structuredValue || '',\n      status: 'active',\n      confidence: Math.max(existingDuplicate.confidence || 0, confidence),\n      sourceMessageId: sourceMessageIdInput || existingDuplicate.sourceMessageId || '',\n      sourceType: sourceTypeInput || existingDuplicate.sourceType || 'user_explicit',\n      createdAt: existingDuplicate.createdAt || nowIso,\n      updatedAt: nowIso,\n      lastAccessedAt: nowIso,\n      embedding: embString || existingDuplicate.embedding || '',\n      schemaVersion: '1.0'\n    };\n\n    return [{\n      json: {\n        operationType: 'update',\n        sheetId,\n        row_number: existingDuplicate.row_number,\n        memory: updatedRow,\n        response: 'Memory already noted. Refreshed timestamp for: \"' + contentInput + '\".',\n        isDuplicate: true,\n        ...updatedRow\n      }\n    }];\n  }\n\n  let supersedeTarget = null;\n  if (structuredValStr) {\n    try {\n      const parsedNew = JSON.parse(structuredValStr);\n      if (parsedNew.key) {\n        supersedeTarget = existingMemories.find(m => {\n          if (m.status !== 'active' || !m.structuredValue) return false;\n          try {\n            const p = JSON.parse(m.structuredValue);\n            return p.key === parsedNew.key;\n          } catch (e) { return false; }\n        });\n      }\n    } catch (e) {}\n  }\n\n  const newMemoryId = generateMemoryId();\n  const newRow = {\n    memoryId: newMemoryId,\n    memoryType: assignedType,\n    content: contentInput,\n    structuredValue: structuredValStr,\n    status: 'active',\n    confidence: confidence,\n    sourceMessageId: sourceMessageIdInput,\n    sourceType: sourceTypeInput,\n    createdAt: nowIso,\n    updatedAt: nowIso,\n    lastAccessedAt: nowIso,\n    embedding: embString,\n    schemaVersion: '1.0'\n  };\n\n  return [{\n    json: {\n      operationType: 'append',\n      sheetId,\n      memory: newRow,\n      response: '🧠 Remembered: \"' + contentInput + '\" [' + assignedType + '].',\n      supersededMemoryId: supersedeTarget ? supersedeTarget.memoryId : null,\n      ...newRow\n    }\n  }];\n}\n\n// ACTION: RETRIEVE / LIST / SEARCH\nif (action === 'retrieve' || action === 'list' || action === 'get' || action === 'search' || action === 'show') {\n  const targetStatus = statusInput || 'active';\n  let filtered = existingMemories.filter(m => {\n    if (targetStatus !== 'all' && (m.status || 'active').toLowerCase() !== targetStatus) return false;\n    if (memoryTypeInput && (m.memoryType || '').toLowerCase() !== memoryTypeInput) return false;\n    return true;\n  });\n\n  if (queryText) {\n    // Generate query embedding if query provided\n    const queryEmb = await fetchEmbedding(queryText);\n\n    filtered = filtered.map(m => {\n      let score = 0;\n      let method = 'keyword';\n      if (queryEmb && m.embedding) {\n        try {\n          const memEmb = JSON.parse(m.embedding);\n          if (Array.isArray(memEmb) && memEmb.length === queryEmb.length) {\n            score = cosineSimilarity(queryEmb, memEmb);\n            method = 'semantic_cosine';\n          }\n        } catch (e) {}\n      }\n      if (method === 'keyword') {\n        score = scoreKeywordRelevance(m.content, queryText);\n      }\n      return {\n        ...m,\n        relevance: score,\n        retrievalMethod: method\n      };\n    })\n    .filter(m => {\n      if (m.retrievalMethod === 'semantic_cosine') {\n        return m.relevance > 0.25;\n      }\n      return m.relevance > 0;\n    })\n    .sort((a, b) => b.relevance - a.relevance || (new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)));\n  } else {\n    filtered.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));\n  }\n\n  const results = filtered.slice(0, limit);\n  const summaryText = formatMemorySummary(results);\n\n  return [{\n    json: {\n      operationType: 'read_only',\n      success: true,\n      status: 'SUCCESS',\n      action: 'retrieve',\n      count: results.length,\n      memories: results,\n      response: summaryText,\n      summaryText: summaryText\n    }\n  }];\n}\n\n// ACTION: UPDATE\nif (action === 'update' || action === 'edit' || action === 'modify') {\n  let matched = null;\n  if (memoryIdInput) {\n    matched = existingMemories.find(m => m.memoryId === memoryIdInput);\n  } else if (contentInput) {\n    matched = existingMemories.find(m => (m.content || '').toLowerCase().includes(contentInput.toLowerCase()));\n  }\n\n  if (!matched) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'MEMORY_NOT_FOUND',\n        response: '⚠️ Could not find a memory matching ID/text to update.'\n      }\n    }];\n  }\n\n  let newEmbStr = matched.embedding || '';\n  if (contentInput && contentInput !== matched.content) {\n    const emb = await fetchEmbedding(contentInput);\n    if (emb) newEmbStr = JSON.stringify(emb);\n  }\n\n  const updatedRow = {\n    row_number: matched.row_number,\n    memoryId: matched.memoryId,\n    memoryType: memoryTypeInput || matched.memoryType,\n    content: contentInput || matched.content,\n    structuredValue: structuredValStr !== '' ? structuredValStr : (matched.structuredValue || ''),\n    status: statusInput || matched.status || 'active',\n    confidence: confidence !== undefined ? confidence : (matched.confidence || 1.0),\n    sourceMessageId: sourceMessageIdInput || matched.sourceMessageId || '',\n    sourceType: sourceTypeInput || matched.sourceType || 'user_explicit',\n    createdAt: matched.createdAt || nowIso,\n    updatedAt: nowIso,\n    lastAccessedAt: nowIso,\n    embedding: newEmbStr,\n    schemaVersion: '1.0'\n  };\n\n  return [{\n    json: {\n      operationType: 'update',\n      sheetId,\n      row_number: matched.row_number,\n      memory: updatedRow,\n      response: 'Successfully updated memory: \"' + updatedRow.content + '\".',\n      ...updatedRow\n    }\n  }];\n}\n\n// ACTION: FORGET / DELETE / ARCHIVE\nif (action === 'forget' || action === 'delete' || action === 'archive' || action === 'remove') {\n  let matched = null;\n  if (memoryIdInput) {\n    matched = existingMemories.find(m => m.memoryId === memoryIdInput && m.status !== 'archived');\n  } else if (topicInput) {\n    const cleanTopic = topicInput.toLowerCase();\n    matched = existingMemories.find(m => (m.status !== 'archived') && (\n      (m.content || '').toLowerCase().includes(cleanTopic) ||\n      (m.memoryType || '').toLowerCase() === cleanTopic\n    ));\n  }\n\n  if (!matched) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'NOT_FOUND',\n        response: '⚠️ No active memory found matching \"' + (topicInput || memoryIdInput) + '\".'\n      }\n    }];\n  }\n\n  const updatedRow = {\n    row_number: matched.row_number,\n    memoryId: matched.memoryId,\n    memoryType: matched.memoryType,\n    content: matched.content,\n    structuredValue: matched.structuredValue || '',\n    status: 'archived',\n    confidence: matched.confidence || 1.0,\n    sourceMessageId: matched.sourceMessageId || '',\n    sourceType: matched.sourceType || 'user_explicit',\n    createdAt: matched.createdAt || nowIso,\n    updatedAt: nowIso,\n    lastAccessedAt: nowIso,\n    embedding: matched.embedding || '',\n    schemaVersion: '1.0'\n  };\n\n  return [{\n    json: {\n      operationType: 'update',\n      sheetId,\n      row_number: matched.row_number,\n      memory: updatedRow,\n      response: '🗑️ Memory forgotten: \"' + matched.content + '\".',\n      forgottenId: matched.memoryId,\n      ...updatedRow\n    }\n  }];\n}\n\n// Fallback\nreturn [{\n  json: {\n    operationType: 'read_only',\n    success: false,\n    status: 'UNKNOWN_ACTION',\n    response: 'Unknown action \"' + action + '\". Supported actions: retrieve, write, update, forget.'\n  }\n}];"
+      },
+      "id": "becab7ec-6b8b-43f1-a076-41b6dfb3036c",
+      "name": "Process Memory Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "append"
+            }
+          ]
+        }
+      },
+      "id": "47379b23-efd0-4022-a5a5-819790060201",
+      "name": "Is Append?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Memories",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9d675b61-9f1b-4d40-ad69-0e30713571b2",
+      "name": "Append Memory to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -16,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Memory Action').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'CREATED',\n    action: 'write',\n    response: proc.response,\n    memory: proc.memory\n  }\n};"
+      },
+      "id": "15351910-c023-4234-b923-851dcd2f7afc",
+      "name": "Format Append Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "update"
+            }
+          ]
+        }
+      },
+      "id": "7b13dfe8-abf2-470a-b8c3-9c2ebd4caeba",
+      "name": "Is Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Memories",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ffba47df-fe53-409f-b152-aa3066df9b0d",
+      "name": "Update Memory in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        208,
+        160
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Memory Action').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'UPDATED',\n    action: proc.action || 'update',\n    response: proc.response,\n    memory: proc.memory\n  }\n};"
+      },
+      "id": "c1f6100a-ce64-4991-bf37-305570c8201b",
+      "name": "Format Update Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Memory Action').first().json;\nreturn {\n  json: proc\n};"
+      },
+      "id": "1647b99a-400e-45e4-9c97-88693f8c33d5",
+      "name": "Format Read-Only Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        336
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Memories Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Memories Sheet": {
+      "main": [
+        [
+          {
+            "node": "Process Memory Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Memory Action": {
+      "main": [
+        [
+          {
+            "node": "Is Append?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Append?": {
+      "main": [
+        [
+          {
+            "node": "Append Memory to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Memory to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Append Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Update?": {
+      "main": [
+        [
+          {
+            "node": "Update Memory in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Read-Only Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Memory in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "b924340a-d132-4ee3-bcb5-52d152c32b03",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "KmsRWUjAo33WHa6w",
+  "tags": []
+}

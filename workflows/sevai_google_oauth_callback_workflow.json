@@ -1,0 +1,605 @@
+{
+  "name": "SevAI Google OAuth Callback - Private Sheet Provisioning",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth2.googleapis.com/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "code",
+              "value": "={{ $json.code }}"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $env.GOOGLE_OAUTH_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.GOOGLE_OAUTH_CLIENT_SECRET }}"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "={{ $env.GOOGLE_OAUTH_REDIRECT_URI || 'https://debtless-creation-goal.ngrok-free.dev/webhook/google-oauth-callback' }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8c1d6aed-728a-4edb-8057-86b85420650d",
+      "name": "Exchange Google Authorization Code1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3632,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://openidconnect.googleapis.com/v1/userinfo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Exchange Google Authorization Code1').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "097a5c18-7761-44da-962a-5687672bec63",
+      "name": "Get Google User Information1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3856,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Exchange Google Authorization Code1').item.json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"properties\":{\"title\":\"SevAI_DB_{{ $('Validate Pending User Match').item.json.firstName }}_{{ $('Validate Pending User Match').item.json.chatId }}\"}}",
+        "options": {}
+      },
+      "id": "14a00600-b789-4f93-a6f2-114ebf11d996",
+      "name": "Create Private User Spreadsheet1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4048,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('Create Private User Spreadsheet1').item.json.spreadsheetId }}:batchUpdate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Exchange Google Authorization Code1').item.json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"requests\":[{\"addSheet\":{\"properties\":{\"title\":\"Transactions\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Insights\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Wishlist\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Chats\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Goals\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Budgets\"}}},{\"addSheet\":{\"properties\":{\"title\":\"Memories\"}}},{\"deleteSheet\":{\"sheetId\":{{ $('Create Private User Spreadsheet1').item.json.sheets[0].properties.sheetId }}}}]}",
+        "options": {}
+      },
+      "id": "5ae4fa4b-db81-44e3-91eb-3cf82a26841f",
+      "name": "Create SevAI Tabs and Delete Default Sheet1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "OAuth_Pending",
+          "mode": "name"
+        }
+      },
+      "id": "2bdb1f00-ba65-4625-bee4-bd5a20d90c44",
+      "name": "Delete Consumed OAuth Pending State1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4928,
+        3376
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "google-oauth-callback",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "435c7893-f1c5-4e86-be4f-0ca0d090f1e2",
+      "name": "Google OAuth Callback Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        3072
+      ],
+      "webhookId": "google-oauth-callback"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || $json;\nif (query.error === 'access_denied') return [{json:{ok:false,statusCode:200,message:'Google authorization was cancelled. You can close this window and try again from Telegram.'}}];\nif (!query.state) throw new Error('OAuth callback rejected: missing state');\nif (!query.code) throw new Error('OAuth callback rejected: missing authorization code');\nreturn {json:{state:query.state,code:query.code}};"
+      },
+      "id": "45d7b2d1-37fb-4226-8084-d8c75b7b4d58",
+      "name": "Validate OAuth State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 321794121,
+          "mode": "list",
+          "cachedResultName": "OAuth_Pending",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit#gid=321794121"
+        },
+        "options": {}
+      },
+      "id": "aa20708b-430c-48dc-a9f5-6fcb2569168a",
+      "name": "Find OAuth Pending User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3184,
+        3072
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let callback = {};\ntry {\n  callback = $('Validate OAuth State1').item.json;\n} catch (e) {\n  try {\n    callback = $('Validate OAuth State').item.json;\n  } catch (e2) {\n    callback = {};\n  }\n}\n\nconst targetState = String(callback.state || '').trim();\nif (!targetState) {\n  throw new Error('OAuth callback rejected: missing state parameter in callback');\n}\n\n// Extract chatId if state was encoded as chatId_token\nconst stateChatId = targetState.includes('_') ? targetState.split('_')[0] : null;\n\nconst rows = $input.all().map(item => item.json).filter(r => r && (r.state || r.chatId));\n\n// 1. First priority: exact state match\nlet matches = rows.filter(r => r.state && String(r.state).trim() === targetState);\n\n// 2. Second priority: match by chatId if state has chatId prefix\nif (matches.length === 0 && stateChatId) {\n  matches = rows.filter(r => r.chatId && String(r.chatId).trim() === stateChatId);\n}\n\nif (matches.length === 0) {\n  throw new Error('OAuth callback rejected: no pending registration found for state \"' + targetState + '\"');\n}\n\n// Pick the latest matched pending user\nconst pending = matches[matches.length - 1];\n\nreturn {\n  json: {\n    ...callback,\n    chatId: pending.chatId,\n    firstName: pending.firstName,\n    createdAt: pending.createdAt,\n    row_number: pending.row_number\n  }\n};"
+      },
+      "id": "9e99ac1f-2ded-40e5-a7c4-21a75103f772",
+      "name": "Validate Pending User Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3408,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nlet spreadsheet = {};\ntry { spreadsheet = $('Create Private User Spreadsheet1').item.json; } catch(e) { spreadsheet = $('Create Private User Spreadsheet').item.json; }\nlet user = {};\ntry { user = $('Get Google User Information1').item.json; } catch(e) { user = $('Get Google User Information').item.json; }\nlet pending = {};\ntry { pending = $('Validate Pending User Match1').item.json; } catch(e) { pending = $('Validate Pending User Match').item.json; }\nconst appToken = crypto.randomBytes(24).toString('hex');\nreturn {json:{chatId:pending.chatId,firstName:pending.firstName,googleUserId:user.sub,googleEmail:user.email,sheetId:spreadsheet.spreadsheetId,sheetUrl:spreadsheet.spreadsheetUrl || 'https://docs.google.com/spreadsheets/d/'+spreadsheet.spreadsheetId,appToken:appToken,createdAt:new Date().toISOString()}};"
+      },
+      "id": "f2b37460-5205-4117-ac3f-df00e3304226",
+      "name": "Build User Registration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4592,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 983886894,
+          "mode": "list",
+          "cachedResultName": "Users",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit#gid=983886894"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chatId": "={{ $json.chatId }}",
+            "firstName": "={{ $json.firstName }}",
+            "googleUserId": "={{ $json.googleUserId }}",
+            "googleEmail": "={{ $json.googleEmail }}",
+            "sheetId": "={{ $json.sheetId }}",
+            "sheetUrl": "={{ $json.sheetUrl }}",
+            "appToken": "={{ $json.appToken }}",
+            "createdAt": "={{ $json.createdAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "chatId",
+              "displayName": "chatId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "firstName",
+              "displayName": "firstName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "googleUserId",
+              "displayName": "googleUserId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "googleEmail",
+              "displayName": "googleEmail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sheetId",
+              "displayName": "sheetId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sheetUrl",
+              "displayName": "sheetUrl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "appToken",
+              "displayName": "appToken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "589f95c3-e2b1-48ef-bf6c-057be88d7545",
+      "name": "Save User Registration to Master Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4752,
+        3072
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "=🎉 **You are all set, {{ $json.firstName }}!**\n\nYour private SevAI financial vault has been created in your Google Drive.\n\n📊 **Your personal sheet:**\n[View on Google Sheets]({{ $json.sheetUrl }})\n\n📱 **Android App Token:**\n`{{ $json.appToken }}`\n\nEverything is ready. You can now start using SevAI by sending a message here!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "f7f38ba6-b3b0-47cb-a628-bbe62cbb08d5",
+      "name": "Send Telegram Success Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        5024,
+        3072
+      ],
+      "webhookId": "3b4617f5-47c2-4661-9cd5-679dd38bfe28",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Create Private User Spreadsheet1').item.json.spreadsheetId }}/permissions",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "sendNotificationEmail",
+              "value": "false"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Exchange Google Authorization Code1').item.json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"role\":\"writer\",\"type\":\"user\",\"emailAddress\":\"user-1@telegram-sheet-bot-483011.iam.gserviceaccount.com\"}",
+        "options": {}
+      },
+      "id": "ef0ca68d-e1c8-4a40-8e18-234a4d645168",
+      "name": "Grant n8n Access to Private Spreadsheet1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4224,
+        3072
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Exchange Google Authorization Code1": {
+      "main": [
+        [
+          {
+            "node": "Get Google User Information1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google User Information1": {
+      "main": [
+        [
+          {
+            "node": "Create Private User Spreadsheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Private User Spreadsheet1": {
+      "main": [
+        [
+          {
+            "node": "Grant n8n Access to Private Spreadsheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create SevAI Tabs and Delete Default Sheet1": {
+      "main": [
+        [
+          {
+            "node": "Build User Registration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google OAuth Callback Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate OAuth State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate OAuth State": {
+      "main": [
+        [
+          {
+            "node": "Find OAuth Pending User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find OAuth Pending User": {
+      "main": [
+        [
+          {
+            "node": "Validate Pending User Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Pending User Match": {
+      "main": [
+        [
+          {
+            "node": "Exchange Google Authorization Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build User Registration": {
+      "main": [
+        [
+          {
+            "node": "Save User Registration to Master Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Registration to Master Users": {
+      "main": [
+        [
+          {
+            "node": "Delete Consumed OAuth Pending State1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Telegram Success Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grant n8n Access to Private Spreadsheet1": {
+      "main": [
+        [
+          {
+            "node": "Create SevAI Tabs and Delete Default Sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "8f8a75bb-9ef9-4ba3-a219-50dd22587371",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "Tr7vUwFsxEEplTvL",
+  "tags": []
+}

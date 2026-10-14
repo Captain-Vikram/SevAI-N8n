@@ -1,0 +1,98 @@
+{
+  "name": "Tool - Expense Analyzer",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0501cdb9-aca3-4aff-bcc8-3c48c0922a9b",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "5bf09334-01b0-4af7-b147-2504aefd4b33",
+      "name": "Read Transactions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        208,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allTxs = $input.all().map(item => item.json);\n\nif (allTxs.length === 0) {\n  return { json: { response: \"No transactions found to analyze.\" } };\n}\n\nlet categoryTotals = {};\nlet vendorTotals = {};\nlet totalSpent = 0;\n\n// Analyze the last 100 transactions for relevance\nconst recentTxs = allTxs.slice(-100);\n\nrecentTxs.forEach(tx => {\n  const amt = parseFloat(tx.amount);\n  if (!isNaN(amt) && (!tx.type || tx.type.toLowerCase() !== 'income')) {\n    totalSpent += amt;\n    \n    const cat = tx.category || 'Uncategorized';\n    categoryTotals[cat] = (categoryTotals[cat] || 0) + amt;\n    \n    const vendor = tx.vendor || 'Unknown';\n    vendorTotals[vendor] = (vendorTotals[vendor] || 0) + amt;\n  }\n});\n\n// Sort to find top spending\nconst topCategories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);\nconst topVendors = Object.entries(vendorTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);\n\nlet report = `EXPENSE ANALYSIS (Last 100 Txs)\\nTotal Spent: ₹${totalSpent}\\n\\nTop Categories:\\n`;\ntopCategories.forEach(c => report += `- ${c[0]}: ₹${c[1]}\\n`);\n\nreport += `\\nTop Vendors:\\n`;\ntopVendors.forEach(v => report += `- ${v[0]}: ₹${v[1]}\\n`);\n\nreturn { json: { response: report } };"
+      },
+      "id": "ccf38a52-9ffc-4af6-b75f-00700c14a996",
+      "name": "Analyze Spending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Transactions": {
+      "main": [
+        [
+          {
+            "node": "Analyze Spending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "f503d832-631e-4554-a4e6-5c5724b0c418",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "j9famho4l2j8tOcQ",
+  "tags": []
+}

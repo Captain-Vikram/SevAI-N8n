@@ -1,0 +1,219 @@
+{
+  "name": "SevAI - React Dashboard API",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || $json;\nconst sheetId = query.sheetId || $json.sheetId;\n\nif (!sheetId || typeof sheetId !== 'string' || sheetId.trim() === '') {\n  throw new Error('Missing sheetId query parameter');\n}\n\nreturn [\n  {\n    json: {\n      sheetId: sheetId.trim(),\n      query: query\n    }\n  }\n];"
+      },
+      "id": "21659945-1be2-4371-88db-c52de4962e60",
+      "name": "Validate sheetId",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "path": "dashboard-data",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "f2d185d2-ee3b-4161-b0e0-6469bdb23a9b",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        656
+      ],
+      "webhookId": "99ee1fc7-e3d3-4145-a245-1918afcf2ee1"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "593fdeb0-4b51-4e24-a70e-f802f6a58e96",
+      "name": "Read Transactions1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2608,
+        656
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Validate sheetId').first().json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Insights",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "e63cb8af-73c8-4a97-a2c0-5125cae73b51",
+      "name": "Read Insights1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3008,
+        656
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const txsNodes = $('Read Transactions1').all();\nconst rawTxs = txsNodes && txsNodes.length > 0 ? txsNodes.map(i => i.json) : [];\nconst txs = rawTxs.filter(t => t && Object.keys(t).length > 0 && t.amount !== undefined && t.amount !== '' && String(t.type || '').toLowerCase() !== 'deleted');\n\nconst insightsNodes = $('Read Insights1').all();\nconst rawInsights = insightsNodes && insightsNodes.length > 0 ? insightsNodes.map(i => i.json) : [];\nconst insights = rawInsights.filter(i => i && Object.keys(i).length > 0 && (i.insights || i.paramData || i.insight || i.advice));\n\nconst now = new Date();\nconst nowMs = now.getTime();\nconst oneDayMs = 24 * 60 * 60 * 1000;\nconst sevenDaysAgoMs = nowMs - (7 * oneDayMs);\nconst thirtyDaysAgoMs = nowMs - (30 * oneDayMs);\n\nlet totalCredit = 0;\nlet totalDebit = 0;\nlet totalDebitWeek = 0;\nlet totalDebitMonth = 0;\n\nlet catAllTime = {};\nlet catMonthly = {};\nlet catWeekly = {};\n\nlet trendDaily = {};\nlet uniqueActiveDates = new Set();\nlet txDates = [];\n\nconst parseSheetDate = (raw) => {\n  const str = String(raw || '').trim();\n  if (!str) return '';\n  if (/^\\d{5}(\\.\\d+)?$/.test(str)) {\n    const num = parseFloat(str);\n    const ms = (num - 25569) * 86400 * 1000;\n    const d = new Date(ms);\n    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];\n  }\n  const dmyMatch = str.match(/^(\\d{1,2})[-/](d{1,2})[-/](d{4})/);\n  if (dmyMatch) {\n    const day = dmyMatch[1].padStart(2, '0');\n    const month = dmyMatch[2].padStart(2, '0');\n    const year = dmyMatch[3];\n    return year + '-' + month + '-' + day;\n  }\n  const ymdMatch = str.match(/^(\\d{4})[-/](d{1,2})[-/](d{1,2})/);\n  if (ymdMatch) {\n    const year = ymdMatch[1];\n    const month = ymdMatch[2].padStart(2, '0');\n    const day = ymdMatch[3].padStart(2, '0');\n    return year + '-' + month + '-' + day;\n  }\n  const parsed = new Date(str);\n  if (!isNaN(parsed.getTime())) {\n    return parsed.toISOString().split('T')[0];\n  }\n  return '';\n};\n\ntxs.forEach(t => {\n  const cleanAmtStr = String(t.amount || '').replace(/[^0-9.]/g, '');\n  const amt = parseFloat(cleanAmtStr);\n  if (isNaN(amt) || amt <= 0) return;\n\n  const rawType = String(t.type || '').toLowerCase().trim();\n  const isCredit = rawType === 'credit' || rawType === 'income';\n  const cat = (t.category && String(t.category).trim()) || 'Other';\n\n  const rawDateStr = String(t.date_of_transaction || t.date || t.timestamp || '').trim();\n  let dayKey = parseSheetDate(rawDateStr);\n  let parsedMs = dayKey ? new Date(dayKey).getTime() : NaN;\n\n  if (!dayKey || isNaN(parsedMs)) {\n    dayKey = now.toISOString().split('T')[0];\n    parsedMs = nowMs;\n  }\n\n  txDates.push(parsedMs);\n  uniqueActiveDates.add(dayKey);\n\n  if (!trendDaily[dayKey]) {\n    trendDaily[dayKey] = { date: dayKey, count: 0, credit: 0, debit: 0, net: 0 };\n  }\n  trendDaily[dayKey].count += 1;\n\n  if (isCredit) {\n    totalCredit += amt;\n    trendDaily[dayKey].credit += amt;\n    trendDaily[dayKey].net += amt;\n  } else {\n    totalDebit += amt;\n    trendDaily[dayKey].debit += amt;\n    trendDaily[dayKey].net -= amt;\n\n    catAllTime[cat] = (catAllTime[cat] || 0) + amt;\n\n    if (!isNaN(parsedMs) && parsedMs >= thirtyDaysAgoMs) {\n      catMonthly[cat] = (catMonthly[cat] || 0) + amt;\n      totalDebitMonth += amt;\n    }\n\n    if (!isNaN(parsedMs) && parsedMs >= sevenDaysAgoMs) {\n      catWeekly[cat] = (catWeekly[cat] || 0) + amt;\n      totalDebitWeek += amt;\n    }\n  }\n});\n\n// Calculate real streak\nlet currentStreak = 0;\nconst sortedUniqueDates = Array.from(uniqueActiveDates).sort().reverse();\n\nif (sortedUniqueDates.length > 0) {\n  const todayStr = now.toISOString().split('T')[0];\n  const yesterday = new Date(nowMs - oneDayMs);\n  const yesterdayStr = yesterday.toISOString().split('T')[0];\n\n  let streakCheckDate = null;\n  if (uniqueActiveDates.has(todayStr)) {\n    streakCheckDate = new Date(todayStr);\n  } else if (uniqueActiveDates.has(yesterdayStr)) {\n    streakCheckDate = new Date(yesterdayStr);\n  } else {\n    const latestTxDate = new Date(sortedUniqueDates[0]);\n    const diffDays = Math.floor((nowMs - latestTxDate.getTime()) / oneDayMs);\n    if (diffDays <= 2) {\n      streakCheckDate = latestTxDate;\n    }\n  }\n\n  if (streakCheckDate) {\n    while (true) {\n      const dKey = streakCheckDate.toISOString().split('T')[0];\n      if (uniqueActiveDates.has(dKey)) {\n        currentStreak++;\n        streakCheckDate.setDate(streakCheckDate.getDate() - 1);\n      } else {\n        break;\n      }\n    }\n  } else {\n    currentStreak = sortedUniqueDates.length > 0 ? 1 : 0;\n  }\n}\n\nconst colors = [\"hsl(var(--chart-1))\", \"hsl(var(--chart-2))\", \"hsl(var(--chart-3))\", \"hsl(var(--chart-4))\", \"hsl(var(--chart-5))\"];\n\nconst formatCat = (catDict, totalD) => {\n  let colorIdx = 0;\n  return Object.keys(catDict).map(c => {\n    const val = catDict[c];\n    return {\n      category: c,\n      total: Math.round(val * 100) / 100,\n      percentage: totalD > 0 ? Number(((val / totalD) * 100).toFixed(1)) : 0,\n      type: \"debit\",\n      color: colors[(colorIdx++) % colors.length]\n    };\n  }).sort((a, b) => b.total - a.total);\n};\n\nconst allTimeData = formatCat(catAllTime, totalDebit);\nconst monthlyData = Object.keys(catMonthly).length > 0 ? formatCat(catMonthly, totalDebitMonth) : allTimeData;\nconst weeklyData = Object.keys(catWeekly).length > 0 ? formatCat(catWeekly, totalDebitWeek) : monthlyData;\n\nconst dailyTrendArr = Object.values(trendDaily).sort((a, b) => a.date.localeCompare(b.date));\nlet rollingBalance = 50000;\ndailyTrendArr.forEach(d => {\n  rollingBalance += d.net;\n  d.balanceAfter = rollingBalance;\n  d.averageAccountBalance = rollingBalance;\n});\n\n// Parse insights / habit tips\nlet habitTips = [];\nif (insights.length > 0) {\n  const recentInsights = insights.slice(-2).reverse();\n  recentInsights.forEach((row, i) => {\n    let rawText = row.insights || row.paramData || row.insight || row.advice || \"\";\n    let cleanCounsel = \"\";\n    if (typeof rawText === \"string\") {\n      rawText = rawText.trim();\n      if (rawText.startsWith(\"{\") || rawText.startsWith(\"[\")) {\n        try {\n          const parsed = JSON.parse(rawText);\n          cleanCounsel = parsed.counsel || parsed.advice || parsed.insights || parsed.analysis || parsed.summary || rawText;\n        } catch (e) {\n          cleanCounsel = rawText;\n        }\n      } else {\n        cleanCounsel = rawText;\n      }\n    } else if (typeof rawText === \"object\" && rawText !== null) {\n      cleanCounsel = rawText.counsel || rawText.advice || rawText.insights || rawText.analysis || JSON.stringify(rawText);\n    }\n\n    if (cleanCounsel) {\n      habitTips.push({\n        id: \"habit-\" + (i + 1),\n        habitLabel: i === 0 ? \"Latest Spending Analysis\" : \"Financial Coaching Tip\",\n        counsel: cleanCounsel,\n        recordedAt: row.generatedAt || new Date().toISOString(),\n        accent: i === 0 ? \"primary\" : \"secondary\"\n      });\n    }\n  });\n}\n\nif (habitTips.length === 0) {\n  habitTips.push({\n    id: \"habit-1\",\n    habitLabel: \"Financial Coach\",\n    counsel: totalDebit > 0 \n      ? \"You have logged ₹\" + totalDebit.toLocaleString('en-IN') + \" across \" + txs.length + \" transactions. Keep tracking daily to preserve your \" + currentStreak + \"-day streak!\"\n      : \"Welcome to SevAI! Start recording your daily income or expenses in Telegram to generate intelligent spending counsel.\",\n    recordedAt: new Date().toISOString(),\n    accent: \"primary\"\n  });\n}\n\nconst todayStr = now.toISOString().split('T')[0];\nconst startDate = txDates.length > 0 ? new Date(Math.min(...txDates)).toISOString().split('T')[0] : todayStr;\nconst endDate = txDates.length > 0 ? new Date(Math.max(...txDates)).toISOString().split('T')[0] : todayStr;\n\nconst tableData = txs.slice(-15).reverse().map((t, i) => {\n  const d = t.date_of_transaction || t.date || t.timestamp || '';\n  const dateStr = parseSheetDate(d) || todayStr;\n  const rawType = String(t.type || '').toLowerCase();\n  const isIncome = rawType === 'credit' || rawType === 'income';\n  const amtNum = parseFloat(String(t.amount || '').replace(/[^0-9.]/g, '')) || 0;\n\n  return {\n    id: t.row_number ? \"#\" + t.row_number : \"TX-\" + (i + 1),\n    name: t.vendor || t.description || (isIncome ? \"Income Deposit\" : \"Expense\"),\n    email: t.category || \"General\",\n    status: isIncome ? \"Income\" : \"Expense\",\n    amount: (isIncome ? \"+₹\" : \"-₹\") + amtNum.toLocaleString('en-IN'),\n    rawAmount: amtNum,\n    date: dateStr,\n    type: isIncome ? \"credit\" : \"debit\"\n  };\n});\n\nconst response = {\n  metadata: {\n    generatedAt: now.toISOString(),\n    currency: \"INR\"\n  },\n  account: {\n    currentStreak: currentStreak,\n    balance: {\n      initial: 50000,\n      current: 50000 + totalCredit - totalDebit,\n      maxEverReached: 50000 + Math.max(0, totalCredit)\n    }\n  },\n  transactions: {\n    summary: {\n      totalCount: txs.length,\n      totalCredit: totalCredit,\n      totalDebit: totalDebit,\n      netFlow: totalCredit - totalDebit,\n      dateRange: { start: startDate, end: endDate }\n    },\n    trend: { daily: dailyTrendArr },\n    categoryBreakdown: {\n      periods: {\n        weekly: {\n          currency: \"INR\",\n          totalDebit: totalDebitWeek > 0 ? totalDebitWeek : totalDebit,\n          label: \"This Week\",\n          data: weeklyData\n        },\n        monthly: {\n          currency: \"INR\",\n          totalDebit: totalDebitMonth > 0 ? totalDebitMonth : totalDebit,\n          label: \"This Month\",\n          data: monthlyData\n        },\n        allTime: {\n          currency: \"INR\",\n          totalDebit: totalDebit,\n          label: \"All Time\",\n          data: allTimeData\n        }\n      }\n    }\n  },\n  insights: {\n    habitTips: habitTips,\n    coachAdvice: []\n  },\n  paramInsights: {},\n  wishlistItems: [],\n  tableData: tableData\n};\n\nreturn [{ json: response }];"
+      },
+      "id": "d2aa67c4-a6e6-4063-90ae-a786da31d42d",
+      "name": "Format JSON1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3216,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type, ngrok-skip-browser-warning, Authorization"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6f701ca1-af7c-4787-8771-25e20acfe04f",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3408,
+        656
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Validate sheetId": {
+      "main": [
+        [
+          {
+            "node": "Read Transactions1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Validate sheetId",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Transactions1": {
+      "main": [
+        [
+          {
+            "node": "Read Insights1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Insights1": {
+      "main": [
+        [
+          {
+            "node": "Format JSON1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format JSON1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4aaf7a72-e72d-4efe-a8ea-6fc9595c80f1",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "6Z9OFwBXVT69lQec",
+  "tags": []
+}

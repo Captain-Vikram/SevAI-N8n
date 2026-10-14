@@ -1,0 +1,77 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.1.101:1234/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"google/gemma-4-e2b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are DEV, a financial transaction classifier.\\n\\nYour ONLY job is to determine whether the input contains a REAL, COMPLETED financial transaction and, if it does, extract the transaction into the required JSON schema.\\n\\nDo NOT chat.\\nDo NOT explain.\\nDo NOT give advice.\\nDo NOT summarize.\\nDo NOT use markdown.\\nDo NOT output anything outside the JSON object.\\n\\nDECISION:\\nA message is a transaction when it describes an expense, purchase, money spent, or money received, EVEN IN SHORTHAND or without explicit verbs.\\n\\nVALID (ALWAYS EXTRACT):\\n- I spent 500 on Swiggy\\n- Paid Rs 850 at Starbucks\\n- Received 20000 salary\\n- sunscreen of 212 and a toner of 311 (VALID: 2 items!)\\n- sunscreen 240\\n- toner of 383 rupees\\n- bought toner for 311\\n- coffee 150\\n- auto 50 rs\\n- 20 on snacks\\n- Rs 500 debited from my account\\n- Sent 1000 to Rahul\\n- Got 2000 from Amazon refund\\n\\nINVALID:\\n- How much did I spend?\\n- I want to spend Rs 500\\n- Should I spend Rs 500?\\n- I might buy a phone for 40000\\n- advertisements\\n- OTP messages\\n- balance-only messages\\n- offers or warnings\\n- questions about transactions\\n\\nOUTPUT FORMAT:\\n1. If NOT a transaction:\\n{\\\"isNull\\\": true, \\\"confidence\\\": \\\"HIGH\\\", \\\"missing\\\": []}\\n\\n2. If MULTIPLE transactions in input (e.g. 'sunscreen of 212 and toner of 311'):\\n{\\\"isNull\\\": false, \\\"transactions\\\": [{\\\"amount\\\": 212, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"sunscreen\\\", \\\"category\\\": \\\"Shopping\\\"}, {\\\"amount\\\": 311, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"toner\\\", \\\"category\\\": \\\"Shopping\\\"}]}\\n\\n3. If SINGLE transaction:\\n{\\\"isNull\\\": false, \\\"amount\\\": 311, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"toner\\\", \\\"currency\\\": \\\"INR\\\", \\\"medium\\\": \\\"other\\\", \\\"category\\\": \\\"Shopping\\\", \\\"description\\\": \\\"\\\", \\\"date_of_transaction\\\": \\\"\\\", \\\"confidence\\\": \\\"HIGH\\\", \\\"missing\\\": []}\\n\\nFIELD RULES:\\namount: Number only. Never a string.\\ntype: Only \\\"debit\\\" or \\\"credit\\\".\\ncurrency: Use \\\"INR\\\" for Rs, INR or Indian rupee references.\\nmedium: Only one of: \\\"upi\\\" \\\"card\\\" \\\"bank\\\" \\\"other\\\"\\ncategory: Only one of: \\\"Transfer\\\" \\\"Food & Dining\\\" \\\"Shopping\\\" \\\"Travel\\\" \\\"Entertainment\\\" \\\"Bills & Utilities\\\" \\\"Health\\\" \\\"Other\\\"\\n\\nIMPORTANT: Do not invent details. If shorthand item name is given (e.g. sunscreen, toner, snacks), use it as targetParty.\\n\\nJSON ONLY. NO MARKDOWN. NO EXPLANATION.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Context date: {{ new Date().toISOString() }}\\nInput: {{ $json.query }}\"\n    }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 1500\n}",
+        "options": {}
+      },
+      "id": "08f26d3a-fb4f-4f27-8045-ba70e096fab3",
+      "name": "Dev Agent - Classifier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2544,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const norm = $('Input Normalizer').item.json;\nconst rawInput = $input.item.json;\nconst content = rawInput?.choices?.[0]?.message?.content || '';\nconst reasoning = rawInput?.choices?.[0]?.message?.reasoning_content || '';\nconst rawText = content.trim() || reasoning.trim();\n\nlet devData = null;\n\ntry {\n  const cleaned = rawText\n    .replace(/<think>[\\s\\S]*?<\\/think>/gi, '')\n    .replace(/```json/gi, '')\n    .replace(/```/gi, '')\n    .trim();\n\n  const match = cleaned.match(/(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])/);\n  if (match) {\n    devData = JSON.parse(match[0]);\n  }\n} catch(e) {\n  devData = null;\n}\n\n// Resilient Fallback Regex Parser if model produced unparseable output\nif (!devData || (devData.isNull && devData.amount === undefined)) {\n  const query = norm.query || '';\n  const amtMatch = query.match(/(?:rs\\.?|inr|rupees|\\$)?\\s*(\\d+(?:\\.\\d{1,2})?)/i) || query.match(/(\\d+(?:\\.\\d{1,2})?)\\s*(?:rs\\.?|inr|rupees)?/i);\n  if (amtMatch) {\n    const amt = parseFloat(amtMatch[1]);\n    let item = query\n      .replace(/(?:bought|spent|paid|for|of|on|a|an|the|rs\\.?|inr|rupees|\\$|\\d+(?:\\.\\d+)?)/gi, ' ')\n      .trim()\n      .replace(/\\s+/g, ' ');\n    devData = {\n      isNull: false,\n      amount: amt,\n      type: 'debit',\n      targetParty: item || 'Unknown',\n      category: 'Shopping'\n    };\n  }\n}\n\nif (!devData) {\n  devData = { isNull: true, amount: 0, targetParty: 'Unknown' };\n}\n\n// 1. Support multi-item transactions array\nif (devData.transactions && Array.isArray(devData.transactions) && devData.transactions.length > 0) {\n  return devData.transactions.map(tx => {\n    const amt = parseFloat(tx.amount) || 0;\n    return {\n      json: {\n        ...norm,\n        isNull: false,\n        hasMissingData: amt === 0,\n        missingFields: amt === 0 ? 'Amount' : '',\n        amount: amt,\n        category: tx.category || 'Shopping',\n        vendor: tx.targetParty || tx.vendor || 'Unknown',\n        type: (tx.type || 'debit').toLowerCase() === 'credit' ? 'Income' : 'Expense',\n        medium: tx.medium || 'other',\n        description: tx.description || '',\n        date: tx.date_of_transaction || new Date().toISOString().split('T')[0]\n      }\n    };\n  });\n}\n\n// 2. Single transaction flow\nconst amount = parseFloat(devData.amount) || 0;\nconst confidence = (devData.confidence || 'HIGH').toUpperCase();\nlet missingFields = Array.isArray(devData.missing) ? [...devData.missing] : [];\n\nif (confidence === 'LOW') {\n  devData.isNull = true;\n} else if (confidence === 'MEDIUM' && missingFields.length === 0) {\n  missingFields.push('Confirmation needed');\n}\n\nif (amount === 0 && !devData.isNull) missingFields.push('Amount');\nif (!devData.targetParty && !devData.isNull) missingFields.push('Merchant');\n\nconst isTransactionNull = devData.isNull === true || (amount === 0 && !devData.targetParty);\n\nreturn [{\n  json: {\n    ...norm,\n    isNull: isTransactionNull,\n    hasMissingData: missingFields.length > 0 && !isTransactionNull,\n    missingFields: missingFields.join(', '),\n    amount,\n    category: devData.category || 'Other',\n    vendor: devData.targetParty || 'Unknown',\n    type: (devData.type || 'debit').toLowerCase() === 'credit' ? 'Income' : 'Expense',\n    medium: devData.medium || 'other',\n    description: devData.description || '',\n    date: devData.date_of_transaction || new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "b0ad9450-653b-43fa-b198-5e0026957949",
+      "name": "Clean & Format1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        2720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isNull == false }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "75fe5b8d-a791-40fa-b87a-9f951835714c",
+      "name": "Is Transaction?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -2128,
+        2736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pastTransactions = $input.all();\n\n// Safely retrieve current transaction regardless of node renaming\nlet currentTx = {};\nconst candidateNodes = ['Clean & Format1', 'Clean & Format', 'Clean & Format2', 'Is Data Missing?', 'Is Transaction?'];\nfor (const name of candidateNodes) {\n  try {\n    const nodeObj = $(name);\n    const item = (nodeObj && nodeObj.item && nodeObj.item.json) ? nodeObj.item.json : (nodeObj && nodeObj.first ? nodeObj.first().json : null);\n    if (item && (item.amount !== undefined || item.query !== undefined)) {\n      currentTx = item;\n      break;\n    }\n  } catch(e) {}\n}\n\nlet isDuplicate = false;\nlet duplicateReason = '';\n\nif (pastTransactions.length > 0 && pastTransactions[0].json && pastTransactions[0].json.amount !== undefined) {\n  const txDate = new Date(currentTx.date || new Date().toISOString().split('T')[0]);\n  isDuplicate = pastTransactions.some(pt => {\n    if (!pt.json || pt.json.amount === undefined) return false;\n    const diffDays = Math.abs((txDate - new Date(pt.json.date)) / (1000 * 60 * 60 * 24));\n    const sameAmount = parseFloat(pt.json.amount) === parseFloat(currentTx.amount);\n    const v1 = (pt.json.vendor || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n    const v2 = (currentTx.vendor || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n    const isFuzzyVendor = (v1.includes(v2) && v2.length > 3) || (v2.includes(v1) && v1.length > 3);\n    if (sameAmount && diffDays <= 1 && isFuzzyVendor) {\n      duplicateReason = `Matches past transaction: Rs.${pt.json.amount} at ${pt.json.vendor}`;\n      return true;\n    }\n    return false;\n  });\n}\n\nreturn { json: { ...currentTx, isDuplicate, duplicateReason } };"
+      },
+      "id": "e04f8299-0608-40b8-ba52-a9a89beeb428",
+      "name": "Smart Check Duplicate1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1536,
+        2784
+      ]
+    }
+  ]
+}

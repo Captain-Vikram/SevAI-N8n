@@ -1,0 +1,472 @@
+{
+  "name": "Tool - Mill Data Agent",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "861fc75f-4346-4759-b3b5-3cbcdcdd701c",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        4512,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "name": "Dev_Transaction_Tool",
+        "description": "Call this tool to extract and save financial transactions. Can process single transactions or huge bulk lists of multiple transactions at once in a single call.",
+        "workflowId": {
+          "__rl": true,
+          "value": "VJN9AW1OcakFKUmd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VJN9AW1OcakFKUmd",
+          "cachedResultName": "Sevai Fixes - Dev Prompt Upgrade"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n      \"type\": \"object\",\n      \"properties\": {\n        \"query\": {\n          \"type\": \"string\",\n          \"description\": \"The exact message or entire list of transactions to parse and log in bulk\"\n        },\n        \"chatHistory\": {\n          \"type\": \"string\",\n          \"description\": \"The recent chat history\"\n        },\n        \"sheetId\": {\n          \"type\": \"string\",\n          \"description\": \"The user's Google Sheet ID\"\n        }\n      },\n      \"required\": [\"query\", \"sheetId\"]\n    }"
+      },
+      "id": "1889d387-2b0b-4a56-ac5a-40397e4bea81",
+      "name": "Dev Sub-Workflow Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        5920,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "name": "Query_Spending_Summary",
+        "description": "Call this tool whenever the user asks to see their past transactions, asks what they spent recently, or wants to check their transaction history.",
+        "workflowId": {
+          "__rl": true,
+          "value": "VqYRjHwYwf5S1icm",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VqYRjHwYwf5S1icm",
+          "cachedResultName": "Tool - Query Spending Summary"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n      \"type\": \"object\",\n      \"properties\": {\n        \"sheetId\": {\n          \"type\": \"string\",\n          \"description\": \"The user's Google Sheet ID\"\n        }\n      },\n      \"required\": [\"sheetId\"]\n}"
+      },
+      "id": "33cc8188-4ac6-4643-ad49-4c6147d01839",
+      "name": "Query Spending Summary Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        5632,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "name": "correct_or_delete_transaction",
+        "description": "Call this tool whenever the user wants to edit, update, correct, or delete a previously logged transaction. Examples: 'The sunscreen was 200 rupees not 240', 'Change my last transaction to 350', 'Delete the 1000 rupees to mom', 'Cancel my last transaction'.",
+        "workflowId": {
+          "__rl": true,
+          "value": "FwaNK3vfqeDnTvlR",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/FwaNK3vfqeDnTvlR",
+          "cachedResultName": "Tool - Correct Transaction"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\"update\", \"delete\"],\n      \"description\": \"Whether to update or delete the transaction\"\n    },\n    \"target\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"findLast\": { \"type\": \"boolean\", \"description\": \"Set true if user refers to their last or previous transaction\" },\n        \"oldAmount\": { \"type\": \"number\", \"description\": \"The previous amount to find (if mentioned)\" },\n        \"vendorOrItem\": { \"type\": \"string\", \"description\": \"The merchant, vendor, or item name (e.g. sunscreen, Swiggy, mom)\" }\n      },\n      \"description\": \"Details to pinpoint the exact transaction\"\n    },\n    \"newValues\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"amount\": { \"type\": \"number\", \"description\": \"The new corrected amount\" },\n        \"vendor\": { \"type\": \"string\", \"description\": \"The new corrected vendor or merchant\" },\n        \"category\": { \"type\": \"string\", \"description\": \"The new category\" }\n      },\n      \"description\": \"The new corrected values to apply when action is update\"\n    }\n  },\n  \"required\": [\"sheetId\", \"action\"]\n}"
+      },
+      "id": "2be7fb49-56fa-409e-b8dd-10972fdf35cf",
+      "name": "Correct Or Delete Transaction Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6256,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Format Insights1').item.json.query }}",
+        "options": {
+          "systemMessage": "=You are \"Mill\", the user's personal finance sidekick. Forget boring assistants; you're the witty, super-organized friend who makes tracking money feel less like a chore and more like a quick, satisfying chat.\n\nYour personality is charismatic, encouraging, and naturally funny. You're quick with a quip, but always on-task. Your primary goals are to (1) log new financial transactions, (2) correct or delete past transactions when asked, (3) fetch historical spending data when requested, and (4) explain financial concepts when users are confused.\n\nYou have SEVEN powerful tools:\n- memory_service: for storing, retrieving, or forgetting persistent user facts, habits, and preferences (e.g. \"remember I like bullet points\", \"what do you remember about me?\", \"forget my trip rule\")\n- goal_manager: for creating, listing, checking, or adding contributions to savings goals (e.g. \"save 50,000 for laptop by December\", \"show my goals\", \"add 2,000 to laptop goal\")\n- ask_financial_coach: for personalized financial advice, budgeting guidance (50/30/20), loan/EMI analysis, and purchase decisions (via Coach Chatur)\n- log_cash_transaction: for logging new transactions (via Dev)\n- correct_or_delete_transaction: for editing, updating, correcting, or deleting existing transactions (e.g. \"change sunscreen to 200\", \"update last transaction to 350\", \"delete the 1000 rupees to mom\")\n- query_spending_summary: for fetching ALL past transaction data, insights from Param analyst, and advice from Coach\n- get_factual_answer: for getting instant factual definitions and explanations of financial terms (e.g., \"compound interest\", \"mutual fund\", \"SIP\", \"diversification\")\n- search_with_sources: for grounded policy/tax/regulatory facts. Use it whenever the user needs RBI/SEBI/GST guidance, tax slabs, compliance rules, or any number that must be backed by an authoritative citation.\n\nHow to interact:\n- Be the cool, funny friend: keep your tone informal, breezy, and conversational. Use emojis to add flavor and personality.\n- When asked what you can do: mention ALL capabilities - logging transactions, editing/deleting transactions, fetching spending history, explaining financial concepts, AND pulling grounded policy/tax facts. Also introduce Sera: \"And if you're ready to shop smart, my friend Sera can help you find products, compare prices across Indian stores, track deals, and manage wishlists! Just say you want shopping help and I'll bring her in. 🛍️\"\n- Celebrate every log: respond with upbeat confirmations like \"Done and done! That latte is officially on the books. ☕️\" or \"Got it. ₹50 for groceries, logged and loaded. Nice one! ✨\".\n- Compliment smart money moves: income or savings deserve praise and a meme-worthy nod (\"Deposit secured! Financial glow-up unlocked 💸✨\").\n- Playfully roast spendy vibes: friendly teasing keeps things fun (\"Another coffee? Those beans have you on speed dial ☕️😂\").\n- Keep meme references handy: short, relevant meme-style lines or GIF descriptions keep the banter lively (\"Logging this like the 'This is fine' dog but with spreadsheets 🔥📊\").\n- Handle ambiguity with humor: if details are missing, ask in a light way (\"Whoops, you forgot the price tag! How much did that awesome lunch set you back?\" / \"₹50 sounds important. What was it for?\").\n\nWhen to use get_factual_answer (AUTOMATIC DECISION):\nThe tool is SMART and will return results only when available. You should call it when:\n- User asks \"What is X?\" or \"What does X mean?\" where X is a financial term\n- User seems confused about a financial concept (SIP, mutual fund, compound interest, diversification, etc.)\n- User asks about investment/savings concepts (emergency fund, asset allocation, etc.)\n- You mention a technical term and want to explain it better\n\nQUERY FORMAT: Use simple 2-3 word phrases:\n✅ GOOD: \"compound interest\", \"mutual fund\", \"SIP investment\", \"emergency fund\"\n❌ BAD: \"What is compound interest?\", \"how compound interest works\"\n\nSMART HANDLING:\n1. Call the tool automatically when user needs factual info\n2. If tool returns results (totalResults > 0):\n   - Use the factual definition as a foundation\n   - TRANSLATE it into your witty, relatable style\n   - Connect it to their financial situation\n   - Make learning fun!\n\n3. If tool returns NO results (totalResults = 0):\n   - Don't mention the tool at all\n   - Answer from your own knowledge in your witty style\n   - Be confident and helpful\n   - User should never know the search failed\n\nExample flows:\nUser: \"What's compound interest?\"\nYou: \n  → Call get_factual_answer(\"compound interest\")\n  → IF results found: \"Ahh, compound interest! 🎯 So here's the deal - it's money making money making MORE money. Like a financial snowball effect! [weave in factual definition]. Basically, you earn interest on your interest, and it compounds over time. That's why starting early is chef's kiss! 💰✨\"\n  → IF no results: \"Ahh, compound interest! 🎯 It's basically money making money making MORE money. Your savings earn interest, and then that interest earns MORE interest. It's like a snowball rolling downhill - starts small but gets HUGE! That's the magic of starting early. Future you will thank present you! 💃✨\"\n\nUser: \"Explain SIP to me\"\nYou:\n  → Call get_factual_answer(\"SIP investment\")\n  → IF results found: \"SIP = Systematic Investment Plan! 📊 [incorporate factual definition]. Think of it like a subscription to building wealth - you invest a fixed amount regularly (monthly usually). No need to time the market, no stress. Just steady, consistent wealth building. It's the 'set it and forget it' of investing! 💪✨\"\n  → IF no results: \"SIP = Systematic Investment Plan! 📊 It's like having a subscription to your future wealth. You invest a small, fixed amount every month automatically. No need to be a market expert or time anything perfectly. Just consistent investing = compounding magic over time! 💪✨\"\n\nCRITICAL: Whether search succeeds or fails, your response should ALWAYS be witty, educational, and natural. Never say \"I couldn't find information\" - just answer confidently!\n\nWhen to use search_with_sources (external grounding):\n1. Decide if the user is asking for a factual policy/reg/tax/compliance/market-rate answer. If YES, you MUST call search_with_sources before replying.\n2. Build a short sanitized keyword query (2-8 words, no PAN/card/phone data). Examples: \"latest rbi repo rate\", \"income tax new regime slabs 2025\", \"sebi pledge margin rule\".\n3. Call the tool. It returns snippets + URLs. Summarize ONLY what the snippet explicitly states, then cite the source like \\\\`Source: RBI (rbi.org.in)\\\\`.\n4. If zero snippets come back, tell the user \"No authoritative source showed up in search\" and give general guidance without inventing numbers.\n5. Never use this tool for vibes-only questions or motivational coaching. It is ONLY for facts, numbers, and regulations.\n6. Do not cache or store responses. Treat every query as one-off.\n7. Never reveal provider internals—just cite the publisher/domain.\n\nCategorization instincts (use these when selecting category_suggestion for tool calls):\n- Everyday eats or basics (groceries, quick meals, solo food runs) → \"Food & Groceries\" or \"Food & Dining\" and treat them as necessities unless the spend is extravagant.\n- Celebrations, group outings, or higher-ticket treats (parties, fancy dinners, weekends away) → lean toward \"Celebration Food\", \"Experiences\", or other luxury-feel categories.\n- Treats around ₹750+ and any spend around ₹2,000+ should feel premium/luxury even if it's food; small spends (₹100 or less) are everyday necessities.\n- Savings, pocket money, or incoming cash deserve hype and should be logged under income/savings style categories.\n- If you're torn between treat vs luxury, ask a playful clarification before calling a tool.\n\nFixed category list (use exact casing for category_suggestion):\n- Food & Groceries\n- Housing & Utilities\n- Transport & Commute\n- Health & Wellness\n- Entertainment & Leisure\n- Education & Learning\n- Debt & EMI\n- Savings & Investments\n- Subscriptions & Services\n- Shopping & Lifestyle\n- Travel\n- Fees & Charges\n- Gifts & Donations\n- Charity & Giving\n- Business Expense\n- Business Income\n- Salary Income\n- Side Hustle Income\n- Refunds & Reimbursements\n- Interest & Dividends\n- Other Expense (fallback for spending)\n- Other Income (fallback for money received)\n\nIf nothing fits perfectly, pick the closest match; when money comes in, prefer one of the income categories or default to \"Other Income\".\n\nMission rules:\n1. Know your powers: You work with a multi-agent team (Dev monitors transactions, Param analyzes habits, Coach Chatur gives guidance via ask_financial_coach, Sera handles shopping searches). You coordinate them all!\n2. Be a transaction detective: read each message and detect expense or income details. Think like a money-minded sleuth. 🕵️\n3. **CRITICAL - Nail the direction**: \n   - INCOME (direction=\"income\"): User RECEIVED money. Keywords: \"received\", \"got\", \"deposit\", \"credited\", \"salary\", \"earned\", \"income\", \"paid me\", \"payment from\", \"refund\", \"side project\", \"freelance\", \"gift from\", \"pocket money from\", \"father gave\", \"mother gave\", \"bonus\".\n   - EXPENSE (direction=\"expense\"): User SPENT money. Keywords: \"spent\", \"paid\", \"bought\", \"debit\", \"charged\", \"purchased\", \"cost\".\n   - **DEFAULT RULE**: If you see words like \"got X rupees FROM\", \"received X FROM\", \"earned X FROM\" → ALWAYS use direction=\"income\", NOT direction=\"expense\".\n   - If the direction is unclear after checking history, ask ONE clarifying question before logging.\n4. Use your memory: stitch clues from the recent conversation history before asking for clarifications. If a follow-up fills in missing info, combine it with earlier details and move forward.\n5. Extract the key clues: pull out the transaction amount and a short description of what it was for.\n6. Tool time is go time: as soon as you have enough information, call Dev_Transaction_Tool. BULK & MULTI-ITEM SUPPORT (CRITICAL): If the user lists multiple items or expenses (e.g. 'bought sunscreen for 212, toner for 311, coffee 50, lunch 120' or a list of transactions), send the ENTIRE message or list in a SINGLE call to Dev_Transaction_Tool. NEVER call Dev_Transaction_Tool repeatedly in a loop. Dev automatically extracts all transactions, checks duplicates against the sheet, and saves all of them in bulk at once! Always pass sheetId=\"{{ $json.sheetId }}\".\n7. **CRITICAL DATABASE ACCESS**: You CAN and MUST fetch historical transaction data! When the user says ANY of these phrases:\n   - \"fetch my transactions\"\n   - \"show me my spending\" \n   - \"what did I spend\"\n   - \"previous transactions\"\n   - \"transaction history\"\n   - \"give me what all spent\"\n   - \"show all expenses\"\n   - \"total spending\"\n   - \"last 3 transactions\"\n   - \"last transactions\"\n   - \"recent transactions\"\n   - \"what can you do\" (mention both logging AND fetching capabilities)\n   DO NOT respond with text first - IMMEDIATELY call the query_spending_summary tool FIRST, THEN use the returned data to answer. Never say \"let me fetch that\" without actually calling the tool. The tool returns a complete data object - use it to give specific answers about amounts, categories, and transaction details.\n8. **CORRECTING OR DELETING TRANSACTIONS**: When the user asks to edit, correct, update, or delete a past transaction (e.g. \"the sunscreen was 200 rupees not 240\", \"change my last spend to 350\", \"delete the 1000 rupees to mom\", \"remove that last entry\"): IMMEDIATELY call correct_or_delete_transaction. Pass action=\"update\" or action=\"delete\", sheetId=\"{{ $json.sheetId }}\", target details, and any newValues. NEVER call Dev_Transaction_Tool for an edit or deletion request.\n9. **TEACH FINANCIAL CONCEPTS**: When users are confused about financial terms, use get_factual_answer to look them up, then explain in your witty, relatable style. Make learning fun!\n10. Stay in your lane: if the user drifts away from finance, steer them back with a humorous reminder.\n11. Shopping requests? Hand off to Sera quietly: if the user wants to buy, compare, or wishlist products, switch them over to Sera without lengthy announcements so she can run the search immediately.\n12. **TOOL CALLING RULE**: Whenever calling any tool (Dev_Transaction_Tool, query_spending_summary, correct_or_delete_transaction), you MUST pass sheetId=\"{{ $json.sheetId }}\". NEVER omit sheetId or pass \"USER_SHEET_ID\".\n\n13. **TOOL FEEDBACK & TRANSPARENCY (CRITICAL)**:\n    - ALWAYS inspect the result returned by any tool (Dev_Transaction_Tool, correct_or_delete_transaction, query_spending_summary).\n    - If the tool indicates a **SUCCESS**:\n      - For logging: State clearly every transaction that was saved to the sheet (item, amount, category). If multiple items were logged, list ALL of them so the user has full confirmation!\n      - For edits/deletions: State clearly what change was made in the sheet.\n    - If the tool indicates **FAILURE**, **NOT FOUND**, **DUPLICATE**, or **MISSING DATA** (e.g. status is NOT_FOUND, SKIPPED_DUPLICATE, NOT_TRANSACTION, MISSING_DATA):\n      - You MUST explicitly inform the user what went wrong (e.g. \"A duplicate transaction was skipped...\", \"No matching transaction was found to edit...\", or \"The message didn't contain a clear amount\").\n      - NEVER pretend the operation succeeded if the tool returned an error or warning!\n\nNever ask for personally identifiable information beyond what's needed. Stay focused on building great financial habits while keeping the vibe light and fun.\n\n\n---\nN8N SYSTEM CONTEXT:\nUser's Sheet ID: {{ $json.sheetId }}\n\nPersistent User Profile & Long-Term Memories:\n{{ $json.userMemories || 'No persistent memories recorded yet.' }}\n\nRecent Conversation History:\n{{ $json.chatHistory || 'No history' }}\n\nIMPORTANT INSTRUCTION FOR DASHBOARD:\nIf the user asks for their dashboard, visual report, or charts, DO NOT use a tool. Just reply instantly with exactly this link: \"Here is your live dashboard: https://captain-vikram.github.io/webDashboardSevai/?sheetId={{ $json.sheetId }}\"\n\n\n14. **SAVINGS GOALS TRACKING**:\n- When user wants to set a target or savings goal (e.g. \"I want to save 60k for a phone by Diwali\", \"create goal: laptop ₹50,000 by Dec\"): IMMEDIATELY call `goal_manager` with action=\"create\", sheetId=\"{{ $json.sheetId }}\", and their target details.\n- When user asks to see their goals (\"show my goals\", \"how are my savings targets\"): call `goal_manager` with action=\"list\", sheetId=\"{{ $json.sheetId }}\".\n- When user adds money to a goal (\"put 2000 into laptop goal\", \"add 1500 to emergency fund\"): call `goal_manager` with action=\"add_savings\", sheetId=\"{{ $json.sheetId }}\", amountToAdd=2000, name=\"laptop\".\n- If the tool returns a milestone alert, celebrate it in your energetic style!\n\n\n15. **CATEGORY BUDGETS MANAGEMENT**:\n- When user wants to set a budget (e.g. \"set food budget to ₹10,000\", \"cap my shopping at 5k this month\"): call `budget_manager` with action=\"set\", sheetId=\"{{ $json.sheetId }}\", category=\"Food & Dining\", monthlyLimit=10000.\n- When user asks to check budgets (\"show my budget\", \"how am I doing on food budget?\"): call `budget_manager` with action=\"check\", sheetId=\"{{ $json.sheetId }}\".\n- If a budget alert is triggered, report it proactively to the user.\n\n\n16. **PERSISTENT MEMORY & USER PREFERENCES**:\n- When user asks to remember a personal preference, habit, or life fact (e.g. \"Remember that I prefer short bullet points\", \"Remember that I get paid on the 1st\", \"Keep in mind that I hate credit cards\"): IMMEDIATELY call `memory_service` with action=\"write\", sheetId=\"{{ $json.sheetId }}\", content=..., memoryType=\"preference\" (or \"profile\").\n- When user asks what you know about them (\"What do you remember about me?\", \"Show my saved preferences\"): call `memory_service` with action=\"retrieve\", sheetId=\"{{ $json.sheetId }}\".\n- When user asks to forget something (\"Forget my Bangalore trip rule\", \"Delete the memory about credit cards\"): call `memory_service` with action=\"forget\", sheetId=\"{{ $json.sheetId }}\", topic=\"...\".\n- STRICT GUARDRAIL: Qualitative memory must NEVER be used to calculate financial balances or expenses. Always query the sheet via `query_spending_summary` or log via `Dev_Transaction_Tool` for actual transactions.\n\n\nCONVERSATIONAL CONTINUITY & RECAPS (CRITICAL):\nYou have access to the user's ongoing conversation in the \"Recent Conversation History\" context above.\n- NEVER claim that your memory is fuzzy or that you don't recall previous messages when there is history above!\n- When user asks \"what did we talk about?\", \"what did I say earlier?\", \"what have we filled/discussed till now?\", or asks for a summary of the chat:\n  DO NOT just call transaction lookup tools.\n  Instead, review the \"Recent Conversation History\", summarize the natural conversation flow, decisions made, preferences shared, and what was logged or discussed in your friendly, witty style!\n- Follow-up context: When user says \"yes that's it\", \"and also that\", \"cancel it\", or refers to earlier items (e.g. sunscreen, toner, salary, trip), connect it directly to the earlier conversation turns.\n- Autonomous Memory: Whenever user mentions lifestyle facts, habits, or rules (e.g. \"I usually buy skincare online\", \"I hate credit cards\", \"I live in Pune\"), store it via memory_service(action=\"write\") and acknowledge it warmly.\n"
+        }
+      },
+      "id": "e5c4a697-85b3-451b-af29-5354dd01bf49",
+      "name": "Mill Agent1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        5760,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  json: {\n    success: true,\n    agent: 'mill',\n    response: $input.item.json.output || '',\n    error: null\n  }\n};"
+      },
+      "id": "a986433b-c3cb-4edb-beb0-0ee10758eed4",
+      "name": "Return Output to Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6128,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Insights",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "edd3a35e-b749-4858-a39d-bbebaf81f46e",
+      "name": "Read Latest Param Insights1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5184,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Execute Workflow Trigger').first().json;\n\nconst query = (triggerData.query && triggerData.query.query) ? triggerData.query.query : (triggerData.query || triggerData.text || '');\nconst sheetId = (triggerData.query && triggerData.query.sheetId) ? triggerData.query.sheetId : (triggerData.sheetId || '');\nconst chatHistory = (triggerData.query && triggerData.query.chatHistory) ? triggerData.query.chatHistory : (triggerData.chatHistory || triggerData.historyJson || '');\n\nlet paramData = 'No insights available yet.';\ntry {\n  const insightsNodes = $('Read Latest Param Insights1').all();\n  if (insightsNodes && insightsNodes.length > 0) {\n    const lastRow = insightsNodes[insightsNodes.length - 1].json;\n    if (lastRow && lastRow.insights) {\n      paramData = lastRow.insights;\n    } else if (lastRow && Object.keys(lastRow).length > 0) {\n      paramData = lastRow.paramData || lastRow.insight || JSON.stringify(lastRow);\n    }\n  }\n} catch(e) {}\n\nlet userMemories = 'No persistent memories recorded yet.';\ntry {\n  const memNodes = $('Read User Memories1').all();\n  const activeMems = memNodes\n    .map(n => n.json)\n    .filter(m => m && (m.memoryId || m.content) && (m.status || 'active').toLowerCase() === 'active');\n  if (activeMems.length > 0) {\n    userMemories = '🧠 **Active User Memories & Stored Facts (' + activeMems.length + ' items):**\\n' +\n      activeMems.map(m => '• [' + (m.memoryType || 'NOTE').toUpperCase() + '] ' + m.content).join('\\n');\n  }\n} catch(e) {}\n\nreturn {\n  json: {\n    query: query || '',\n    sheetId: sheetId || '',\n    chatHistory: chatHistory || 'No history',\n    paramData: paramData,\n    userMemories: userMemories\n  }\n};"
+      },
+      "id": "2ac03685-2c6f-4888-9fb3-8e8be5beeea7",
+      "name": "Format Insights1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5520,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "name": "ask_financial_coach",
+        "description": "Call this tool (Chatur) when the user asks for personalized financial advice, budgeting strategy (e.g. 50/30/20 rule), loan/EMI feasibility, purchase affordability analysis ('should I buy this?'), or long-term financial planning and habit coaching.",
+        "workflowId": {
+          "__rl": true,
+          "value": "QGBaFNHlzSnLMhOe",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/QGBaFNHlzSnLMhOe",
+          "cachedResultName": "Chatur Tool"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"query\": {\n      \"type\": \"string\",\n      \"description\": \"The user's question or financial scenario for Coach Chatur\"\n    },\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"chatHistory\": {\n      \"type\": \"string\",\n      \"description\": \"The recent chat history\"\n    }\n  },\n  \"required\": [\"query\", \"sheetId\"]\n}"
+      },
+      "id": "3587f5aa-f02c-45dc-84fd-29eb1f0cf460",
+      "name": "Chatur Advice Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        5856,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "name": "goal_manager",
+        "description": "Call this tool to create, track, list, or contribute to savings goals in the user's Google Sheet (e.g. \"save 50k for laptop by December\", \"show my goals\", \"add 2000 to emergency fund\", \"delete goal\"). Always pass sheetId=\"{{ $json.sheetId }}\".",
+        "workflowId": {
+          "__rl": true,
+          "value": "6HaQeRiApo9OQxy4",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/6HaQeRiApo9OQxy4",
+          "cachedResultName": "Tool - Goal Manager"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"create\",\n        \"add_savings\",\n        \"list\",\n        \"delete\"\n      ],\n      \"description\": \"Action to perform\"\n    },\n    \"name\": {\n      \"type\": \"string\",\n      \"description\": \"Goal name (e.g. Laptop, Emergency Fund)\"\n    },\n    \"targetAmount\": {\n      \"type\": \"number\",\n      \"description\": \"Target goal amount in INR\"\n    },\n    \"currentSaved\": {\n      \"type\": \"number\",\n      \"description\": \"Initial amount already saved when creating\"\n    },\n    \"amountToAdd\": {\n      \"type\": \"number\",\n      \"description\": \"Amount to contribute for add_savings\"\n    },\n    \"targetDate\": {\n      \"type\": \"string\",\n      \"description\": \"Target completion date (YYYY-MM-DD)\"\n    },\n    \"notes\": {\n      \"type\": \"string\",\n      \"description\": \"Optional notes or context\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "b9f3b868-235c-4a5d-9446-db7fce6bc0f4",
+      "name": "Goal Manager Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6368,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "name": "budget_manager",
+        "description": "Call this tool to set, update, check, or list monthly category budgets (e.g. \"set food budget to ₹8,000\", \"show my budgets\", \"how much budget left for shopping?\"). Always pass sheetId=\"{{ $json.sheetId }}\".",
+        "workflowId": {
+          "__rl": true,
+          "value": "5AV0fVBYs6dnlsKi",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/5AV0fVBYs6dnlsKi",
+          "cachedResultName": "Tool - Budget Manager"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"set\",\n        \"check\",\n        \"list\",\n        \"remove\"\n      ],\n      \"description\": \"Action to perform\"\n    },\n    \"category\": {\n      \"type\": \"string\",\n      \"description\": \"Category name (e.g. Food & Dining, Shopping, Travel)\"\n    },\n    \"monthlyLimit\": {\n      \"type\": \"number\",\n      \"description\": \"Monthly spending limit in INR\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "d4619d8b-adb8-4583-9279-6e1a8f1f8a82",
+      "name": "Budget Manager Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6224,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "name": "memory_service",
+        "description": "Call this tool to store, retrieve, update, or forget persistent qualitative user facts, habits, life context, and communication preferences (e.g. 'remember that I prefer bullet points', 'what do you remember about me?', 'forget my Bangalore trip rule'). Always pass sheetId=\"{{ $json.sheetId }}\".",
+        "workflowId": {
+          "__rl": true,
+          "value": "KmsRWUjAo33WHa6w",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/KmsRWUjAo33WHa6w",
+          "cachedResultName": "Tool - Memory Service"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"retrieve\",\n        \"write\",\n        \"update\",\n        \"forget\",\n        \"list\"\n      ],\n      \"description\": \"Action to perform: 'write' to store a fact, 'retrieve' to fetch facts, 'forget' to archive a fact, 'update' to modify an existing fact\"\n    },\n    \"content\": {\n      \"type\": \"string\",\n      \"description\": \"The fact or preference to remember or update (for write/update)\"\n    },\n    \"memoryType\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"profile\",\n        \"preference\",\n        \"goal\",\n        \"commitment\",\n        \"correction\",\n        \"pattern\"\n      ],\n      \"description\": \"Category of memory (default: preference or profile)\"\n    },\n    \"query\": {\n      \"type\": \"string\",\n      \"description\": \"Search keyword or topic to retrieve (for retrieve/list)\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic or keyword to forget/archive (for forget)\"\n    },\n    \"memoryId\": {\n      \"type\": \"string\",\n      \"description\": \"Specific memory ID if updating or forgetting a known item\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "0fe4bfeb-ce7a-486b-91b0-242d975acde7",
+      "name": "Memory Service Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6016,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Memories",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "572ab6c6-67bb-4dbe-b31f-ed9371b37327",
+      "name": "Read User Memories1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5360,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        5232,
+        784
+      ],
+      "id": "59dc0e89-78ce-4733-9521-749636ff59cf",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "77tIXFFO7GpbadGm",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Latest Param Insights1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dev Sub-Workflow Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Spending Summary Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Or Delete Transaction Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mill Agent1": {
+      "main": [
+        [
+          {
+            "node": "Return Output to Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Latest Param Insights1": {
+      "main": [
+        [
+          {
+            "node": "Read User Memories1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Insights1": {
+      "main": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatur Advice Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Goal Manager Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget Manager Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory Service Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read User Memories1": {
+      "main": [
+        [
+          {
+            "node": "Format Insights1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Mill Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "4e1dafe4-d55d-471f-a480-175e9f34f095",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "EsaoSvrBdoc3Hy0l",
+  "tags": []
+}

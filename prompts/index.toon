@@ -1,0 +1,20 @@
+format: TOON
+version: 1
+encoding: tab-separated rows; newlines inside text are escaped as \n
+source_root: .
+files[6]{file,agent,source_files}:
+mill.toon	Mill	web/src/agents/chatbot.ts; web/src/runtime/mill/conversational-mill.ts
+dev.toon	Dev	web/src/agents/dev.ts; web/src/runtime/dev/dev-agent.ts
+param.toon	Param	web/src/agents/analyst.ts
+chatur.toon	Chatur	web/src/agents/coach.ts; web/src/runtime/chatur/conversational-coach.ts
+sera.toon	Sera	web/src/runtime/sera/system-prompt.ts
+router.toon	MillRouter	web/src/runtime/mill/query-router.ts
+runtime_builders[8]{agent,source,builder,inputs}:
+Mill	web/src/runtime/mill/conversational-mill.ts	buildMillPrompt	session.messages; session.collectedInfo; session.intent; session.pendingAction
+Dev	web/src/runtime/dev/dev-agent.ts	analyzeRawSMS	user SMS text
+Param	web/src/runtime/param/habit-tracker.ts	buildAnalysisPrompt	transaction; recentTransactions; previousHabits
+Param	web/src/runtime/param/analyst-agent.ts	buildAnalystPrompt	analysis stats; previous insights
+Chatur	web/src/runtime/chatur/coach-agent.ts	buildCoachPrompt	latest insights; previous insights; user question
+Chatur	web/src/runtime/chatur/conversational-coach.ts	buildConversationalPrompt	insights; extracted data; financial snapshot; transactions; history
+Sera	web/src/runtime/sera/agent/search-planner.ts	buildPlannerPrompt	user message; planner context; max candidates
+MillRouter	web/src/runtime/mill/query-router.ts	user message prompt	user query; current ISO date

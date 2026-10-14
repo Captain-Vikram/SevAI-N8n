@@ -1,0 +1,1344 @@
+{
+  "name": "Sevai Fixes - Agentic Router with Mill Default",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "30635009-5602-48e5-b2e8-77b926ed08a6",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3648,
+        6288
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "⚠️ **Oops! Something went wrong on my end.**\n\nI couldn't process your last request properly (Error: `{{ $json.errorMsg }}`). Please try again in a moment!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "1c0a163b-f0bb-44b8-997e-a593169ccbea",
+      "name": "Send Error Telegram Msg",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -3232,
+        6288
+      ],
+      "webhookId": "c057b218-2ec5-4439-ad69-e223eb803aad",
+      "alwaysOutputData": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let chatId = null;\n\nconst runData = $json.execution?.data?.resultData?.runData || {};\n\ntry {\n  chatId = runData['Extract Telegram Metadata']?.[0]?.data?.main?.[0]?.[0]?.json?.chatId;\n} catch(e) {}\n\nif (!chatId) {\n  try {\n    chatId = runData['Validate App Token1']?.[0]?.data?.main?.[0]?.[0]?.json?.chatId;\n  } catch(e) {}\n}\n\nif (!chatId) {\n  try {\n    chatId = runData['Event Normalizer1']?.[0]?.data?.main?.[0]?.[0]?.json?.chatId;\n  } catch(e) {}\n}\n\nif (!chatId) {\n  chatId = '6319626617';\n}\n\nreturn {\n  json: {\n    chatId: chatId,\n    errorMsg: $json.execution?.error?.message || $json.error?.message || 'Unknown error'\n  }\n};"
+      },
+      "id": "9dc516f9-d241-4d8d-9514-8cdada12e439",
+      "name": "Find Chat ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3440,
+        6288
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "7ce831e5-571a-4363-8066-21318568dffc",
+      "name": "Telegram Trigger1",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -5568,
+        7184
+      ],
+      "webhookId": "94b33386-744c-4f05-9726-6432cc1f978b",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isRegisteredUser }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "6ef599e2-3d7d-4cdf-a8af-85f87d1a9a31",
+      "name": "Branch Onboarding vs Chat1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -4720,
+        7200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api/sms/ingest",
+        "options": {}
+      },
+      "id": "a5f9e48f-5907-4fb5-bbd3-ae9cc95a87db",
+      "name": "Android SMS Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -5072,
+        6912
+      ],
+      "webhookId": "api/sms/ingest"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 983886894,
+          "mode": "list",
+          "cachedResultName": "Users",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit#gid=983886894"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "appToken",
+              "lookupValue": "={{ $json.headers['x-sms-api-key'] || $json.body.appToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9fc86c1d-3012-4cf3-a133-998d105b0ab9",
+      "name": "Lookup User by App Token",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -4848,
+        6896
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const users = $input.all();\nconst webhookItem = $('Android SMS Webhook1').item.json;\nconst payload = webhookItem.body || {};\nconst headers = webhookItem.headers || {};\nconst token = headers['x-sms-api-key'] || payload.appToken;\n\nconst validUsers = users.filter(u => u.json && u.json.appToken && u.json.appToken != '');\nconst foundUser = validUsers.find(u => u.json.appToken === token);\n\nif (foundUser && foundUser.json && foundUser.json.sheetId) {\n  const messagesArray = Array.isArray(payload) ? payload : (Array.isArray(payload.messages) ? payload.messages : null);\n  \n  if (messagesArray && messagesArray.length > 0) {\n    // 1. Process 1-Month Bulk SMS as Pretext Financial Dataset\n    let totalSpent = 0;\n    let totalIncome = 0;\n    let maxExpense = 0;\n    let maxVendor = 'Unknown';\n    let minExpense = Infinity;\n    let minVendor = 'Unknown';\n    const categoryCounts = {};\n    const categoryTotals = {};\n\n    const transactions = [];\n\n    for (const msgObj of messagesArray) {\n      const amt = parseFloat(msgObj.amount) || 0;\n      if (amt <= 0) continue; // Skip non-financial entries\n\n      const rawType = (msgObj.type || '').toLowerCase();\n      const isIncome = rawType === 'credit' || rawType === 'income';\n      const type = isIncome ? 'Income' : 'Expense';\n      \n      const party = (msgObj.targetParty || msgObj.sender || msgObj.senderName || 'Unknown').trim();\n      const desc = msgObj.description || msgObj.message || msgObj.sms_text || '';\n      const medium = msgObj.medium || 'bank';\n      const date = msgObj.extractedDate || (msgObj.datetime_readable ? msgObj.datetime_readable.split(' ')[0] : (msgObj.date || new Date().toISOString().split('T')[0]));\n\n      // Intelligent financial categorization without questions\n      let cat = 'Other Expense';\n      const lower = `${party} ${desc}`.toLowerCase();\n      if (/swiggy|zomato|zepto|blinkit|eat|food|cafe|restaurant|tea|chai|mcdonald|kfc|starbucks|domino|pizza|dine|biryani|bakery/i.test(lower)) {\n        cat = 'Food & Groceries';\n      } else if (/uber|ola|rapido|metro|irctc|railway|train|flight|bus|petrol|fuel|shell|hp|indianoil/i.test(lower)) {\n        cat = 'Transport & Commute';\n      } else if (/amazon|flipkart|myntra|meesho|zara|h&m|nykaa|ajio|croma|shopping|store|mart|supermarket/i.test(lower)) {\n        cat = 'Shopping & Lifestyle';\n      } else if (/electricity|water|gas|wifi|broadband|airtel|jio|vi|bill|recharge|dth|bescom|adani/i.test(lower)) {\n        cat = 'Housing & Utilities';\n      } else if (/netflix|spotify|prime|hotstar|pvr|inox|movie|entertainment|youtube/i.test(lower)) {\n        cat = 'Entertainment & Leisure';\n      } else if (/apollo|pharmeasy|1mg|cult|gym|hospital|clinic|pharmacy|med|fit/i.test(lower)) {\n        cat = 'Health & Wellness';\n      } else if (/emi|loan|credit card|card payment|bajaj finance/i.test(lower)) {\n        cat = 'Debt & EMI';\n      } else if (/salary|stipend|payroll|employer/i.test(lower)) {\n        cat = 'Salary Income';\n      } else if (isIncome) {\n        cat = 'Other Income';\n      }\n\n      // Track Pretext Statistics\n      if (isIncome) {\n        totalIncome += amt;\n      } else {\n        totalSpent += amt;\n        if (amt > maxExpense) {\n          maxExpense = amt;\n          maxVendor = party;\n        }\n        if (amt < minExpense) {\n          minExpense = amt;\n          minVendor = party;\n        }\n        categoryTotals[cat] = (categoryTotals[cat] || 0) + amt;\n        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;\n      }\n\n      transactions.push({\n        amount: amt,\n        vendor: party,\n        category: cat,\n        type: type,\n        medium: medium,\n        description: desc,\n        date: date\n      });\n    }\n\n    if (minExpense === Infinity) minExpense = 0;\n\n    const topCategories = Object.entries(categoryTotals)\n      .sort((a, b) => b[1] - a[1])\n      .map(([cat, total]) => ({\n        category: cat,\n        total: total,\n        count: categoryCounts[cat] || 0\n      }));\n\n    return [{\n      json: {\n        isBulk: true,\n        source: 'android_sms_bulk',\n        sheetId: foundUser.json.sheetId,\n        chatId: foundUser.json.chatId,\n        directTransactions: transactions,\n        analytics: {\n          totalCount: transactions.length,\n          totalSpent,\n          totalIncome,\n          maxExpense,\n          maxVendor,\n          minExpense,\n          minVendor,\n          topCategories\n        }\n      }\n    }];\n  } else {\n    // Single realtime SMS\n    return [{\n      json: {\n        sender: payload.sender || payload.senderName || 'Bank',\n        message: payload.message || payload.sms_text || payload.text || '',\n        isRegisteredUser: true,\n        sheetId: foundUser.json.sheetId,\n        chatId: foundUser.json.chatId,\n        source: 'android_sms',\n        isBulk: false\n      }\n    }];\n  }\n} else {\n  throw new Error('Invalid appToken or user not found');\n}"
+      },
+      "id": "f283548b-55fb-4bf9-82c8-3473375e2a79",
+      "name": "Validate App Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4656,
+        6896
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = '';\nlet chatId = $input.item.json.chatId || '';\nlet sheetId = $input.item.json.sheetId || '';\nlet source = $input.item.json.source || '';\nlet firstName = $input.item.json.firstName || 'User';\nlet isBulk = $input.item.json.isBulk || false;\nlet directTransactions = $input.item.json.directTransactions || null;\nlet analytics = $input.item.json.analytics || null;\n\nif (source === 'android_sms_bulk') {\n  text = 'Bulk 1-month SMS sync';\n} else if (source === 'android_sms' || $input.item.json.message || $input.item.json.sms_text) {\n  const msg = $input.item.json.message || $input.item.json.sms_text || '';\n  const sender = $input.item.json.sender || $input.item.json.senderName || 'Bank';\n  text = `SMS from ${sender}: ${msg}`;\n  source = 'android_sms';\n} else {\n  text = $input.item.json.text;\n  source = 'telegram';\n}\n\nreturn {\n  json: {\n    text,\n    chatId,\n    sheetId,\n    source,\n    firstName,\n    sessionId: chatId,\n    isBulk,\n    directTransactions,\n    analytics\n  }\n};"
+      },
+      "id": "25be0476-e7e4-44db-819d-98c2f09ee78c",
+      "name": "Event Normalizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4464,
+        6896
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Chats",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "82b0c1ff-1a28-4f77-aefe-7e1faf0a0bb9",
+      "name": "Read Chat Memory1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3888,
+        6960
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatRows = $input.all();\nconst norm = $('Event Normalizer').item.json;\n\nconst currentText = norm.text || '';\nconst chatId = norm.chatId || '';\nconst sheetId = norm.sheetId || '';\nconst firstName = norm.firstName || 'User';\nconst source = norm.source || 'unknown';\nconst sessionId = norm.sessionId || `${chatId}_${new Date().getTime()}`;\nconst today = new Date().toISOString().split('T')[0];\n\n// Resilient extraction: accept content, text, agentResponse, message and resolve role\nconst sessionRows = chatRows\n  .map(r => r.json)\n  .filter(r => r && (r.content || r.text || r.agentResponse || r.message))\n  .map(r => {\n    let role = r.role || '';\n    if (!role) {\n      if (r.agentId === 'user' || r.text) role = 'user';\n      else role = 'assistant';\n    } else {\n      role = String(role).toLowerCase();\n    }\n    const text = r.content || r.text || r.agentResponse || r.message || '';\n    return {\n      role: role === 'user' ? 'user' : 'assistant',\n      content: String(text).trim()\n    };\n  })\n  .filter(r => r.content.length > 0);\n\nconst recentRows = sessionRows.slice(-20);\n\nconst historyString = recentRows.map(r => `${r.role === 'user' ? 'USER' : 'ASSISTANT'}: ${r.content}`).join('\\n');\n\nreturn {\n  json: {\n    chatId,\n    sheetId,\n    firstName,\n    source,\n    text: currentText,\n    query: currentText,\n    sessionId,\n    today,\n    historyMessages: recentRows,\n    historyJson: JSON.stringify(recentRows),\n    chatHistory: historyString || 'No history'\n  }\n};"
+      },
+      "id": "bd7de734-1e71-46f3-9659-dcd3c7be1e9c",
+      "name": "Build Messages Array",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3520,
+        7072
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Build Messages Array').item.json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Chats",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "date": "={{ $('Build Messages Array').item.json.today }}",
+            "sessionId": "={{ $('Build Messages Array').item.json.sessionId }}",
+            "agentId": "user",
+            "role": "user",
+            "content": "={{ $('Build Messages Array').item.json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "agentId",
+              "displayName": "agentId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a000d6e7-413e-4066-aaad-d819988f3402",
+      "name": "Write User Message to Memory",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3296,
+        7360
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nreturn { \n  json: { \n    chatId: $json.chatId, \n    firstName: $json.firstName, \n    state: crypto.randomBytes(32).toString('hex'), \n    createdAt: new Date().toISOString() \n  } \n};"
+      },
+      "id": "04610fd3-dc65-4954-89b1-bf16ea00f9a7",
+      "name": "Generate Google OAuth State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4464,
+        7296
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "OAuth_Pending",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "state": "={{ $json.state }}",
+            "chatId": "={{ $json.chatId }}",
+            "firstName": "={{ $json.firstName }}",
+            "createdAt": "={{ $json.createdAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "state",
+              "displayName": "state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "chatId",
+              "displayName": "chatId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "firstName",
+              "displayName": "firstName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a6dc24ed-9ccb-4db2-8285-81e8cbf861b4",
+      "name": "Save OAuth Pending",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -4256,
+        7296
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const CLIENT_ID = (typeof $env !== 'undefined' && $env.GOOGLE_OAUTH_CLIENT_ID) || 'your_google_oauth_client_id_here';\n    const REDIRECT_URI = (typeof $env !== 'undefined' && $env.GOOGLE_OAUTH_REDIRECT_URI) || 'https://debtless-creation-goal.ngrok-free.dev/webhook/google-oauth-callback';\n    const input = $input.first().json;\n    \n    const paramsStr = \"client_id=\" + encodeURIComponent(CLIENT_ID) +\n      \"&redirect_uri=\" + encodeURIComponent(REDIRECT_URI) +\n      \"&response_type=code\" +\n      \"&scope=\" + encodeURIComponent(\"openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file\") + \"&access_type=offline\" + \"&prompt=consent\" + \"&state=\" + encodeURIComponent(input.state);\n    \n    return { \n      json: {\n        ...input,\n        authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?' + paramsStr\n      }\n    };"
+      },
+      "id": "5d15a2cc-fdff-4e9d-a617-18d536042eba",
+      "name": "Generate Google OAuth URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4048,
+        7296
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "👋 **Welcome to SevAI!**\n\nBefore I create your private financial vault, please connect your Google account. Your personal sheet will be created inside your own Google Drive and will remain 100% private to you.\n\nTap below to continue.",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "=🔗 Connect Google Account",
+                    "additionalFields": {
+                      "url": "={{ $json.authUrl }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "4f46c4c0-243b-4c34-b2ad-e84504e13597",
+      "name": "Send Google Verification Telegram Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -3824,
+        7296
+      ],
+      "webhookId": "d4db5c1e-9bba-40a1-9d1c-d8f866404226",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.LM_STUDIO_HOST || 'http://192.168.29.141:1234') }}/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"jev-style-qwen3.5-2b-decision\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the SevAI ROUTER.\\n\\nYour ONLY job is to decide which SevAI agent should handle the user's message.\\n\\nYou are NOT a conversational assistant.\\nYou must NOT answer the user.\\nYou must NOT explain your decision.\\nYou must NOT give financial advice.\\nYou must NOT perform calculations.\\nYou must NOT extract transaction fields.\\n\\nYour entire job is INTENT CLASSIFICATION.\\n\\nAVAILABLE AGENTS:\\n1. mill - Use for: greetings, casual conversation, general questions, financial definitions, transaction logging (I spent / I paid / I received / add this / log this), checking past transactions, spending queries, factual financial questions, anything requiring transaction data lookup.\\n2. chatur - Use for: explicit financial advice, budgeting advice, saving advice, can I afford this, should I buy this, should I spend this, purchase decisions, affordability decisions, financial planning, goal planning, debt decisions, loan decisions, investment decisions, what should I do with my money.\\n\\nDECISION RULES:\\n- RULE 1: Reporting, recording, querying, or retrieving financial DATA → mill\\n- RULE 2: Asking what they SHOULD DO with money → chatur\\n- RULE 3: Can I afford X? → ALWAYS chatur\\n- RULE 4: I spent X on Y → mill\\n- RULE 5: How much did I spend on X? → mill\\n- RULE 6: Where is my money going? → mill\\n- RULE 7: How can I reduce spending? → chatur\\n- RULE 8: Should I reduce spending? → chatur\\n- RULE 9: Message contains both transaction info AND advice question → chatur ONLY if user explicitly asks for a decision or recommendation, otherwise mill\\n- RULE 10: Greetings and casual conversation → mill\\n- RULE 11: Uncertain between mill and chatur → choose mill unless message clearly asks for advice, affordability, planning, or a financial decision\\n\\nOUTPUT FORMAT:\\nRespond with ONLY a valid JSON object. No markdown, no explanation, nothing else.\\n{\\\"route\\\": \\\"mill\\\", \\\"confidence\\\": 0.97}\\nor\\n{\\\"route\\\": \\\"chatur\\\", \\\"confidence\\\": 0.94}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"USER MESSAGE: {{ $json.text }}\\n\\nRECENT HISTORY (last 4 turns):\\n{{ $json.historyJson || 'No history' }}\"\n    }\n  ],\n  \"temperature\": 0.0,\n  \"max_tokens\": 50\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "a416bb6d-dfb9-447c-b3a3-f7413f444973",
+      "name": "Decision Brain (JEV 2B Router)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3296,
+        7072
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = '';\ntry {\n  raw = ($input.item.json?.choices?.[0]?.message?.content || '').trim();\n} catch (e) {}\n\nlet route = 'mill';\nlet confidence = 0.9;\n\nif (raw) {\n  try {\n    const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();\n    const parsed = JSON.parse(cleaned);\n    route = (parsed.route || 'mill').toLowerCase();\n    confidence = parseFloat(parsed.confidence) || 0.9;\n    if (route !== 'mill' && route !== 'chatur') route = 'mill';\n  } catch(e) {\n    route = raw.toLowerCase().includes('chatur') ? 'chatur' : 'mill';\n  }\n}\n\nreturn {\n  json: {\n    ...$('Build Messages Array').item.json,\n    route,\n    confidence\n  }\n};"
+      },
+      "id": "ba04c942-958d-4e87-ad36-77d5825ddd57",
+      "name": "Parse Route Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3056,
+        7072
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "chatur",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "chatur"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "4079dead-ec10-4839-bdff-eeebea253ba5",
+      "name": "Route Switch (Mill or Chatur)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -2816,
+        7056
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "EsaoSvrBdoc3Hy0l",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/EsaoSvrBdoc3Hy0l",
+          "cachedResultName": "Tool - Mill Data Agent"
+        },
+        "options": {}
+      },
+      "id": "4b691e2e-0d0a-4eaa-9a96-9cbb9341df8f",
+      "name": "Execute Mill",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        -2560,
+        7184
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "QGBaFNHlzSnLMhOe",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/QGBaFNHlzSnLMhOe",
+          "cachedResultName": "Chatur Tool"
+        },
+        "options": {}
+      },
+      "id": "b58bf467-beb5-432b-b706-5d7ad8eaa383",
+      "name": "Execute Chatur",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        -2560,
+        6960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const update = $input.item.json;\nconst message = update.message;\n\nif (!message || !message.chat || !message.chat.id) {\n  return [];\n}\n\nconst chatId = message.chat.id;\nconst messageId = message.message_id || null;\nconst userId = message.from ? message.from.id : null;\nconst firstName = message.from ? (message.from.first_name || 'User') : 'User';\nconst text = message.text || '';\nconst updateId = update.update_id || null;\n\n// Unique event identifier\nconst eventId = `telegram:${chatId}:${messageId || updateId || text}`;\n\n// Deduplication Gate (in-memory Map with 5 minute TTL)\nif (!globalThis._sevai_seen_events) {\n  globalThis._sevai_seen_events = new Map();\n}\n\nconst now = Date.now();\n// Clean entries older than 5 minutes\nfor (const [k, v] of globalThis._sevai_seen_events.entries()) {\n  if (now - v > 300000) {\n    globalThis._sevai_seen_events.delete(k);\n  }\n}\n\n// If event was seen within the last 5 minutes, abort immediately (blocks Telegram retry duplicates)\nif (globalThis._sevai_seen_events.has(eventId)) {\n  return [];\n}\n\n// Mark event as seen\nglobalThis._sevai_seen_events.set(eventId, now);\n\nreturn {\n  json: {\n    eventId,\n    updateId,\n    messageId,\n    chatId,\n    userId,\n    firstName,\n    text,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "e2462521-be14-4eec-b8bf-1d86cdd9e569",
+      "name": "Extract Telegram Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5360,
+        7200
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Response Guard').item.json.chatId }}",
+        "text": "={{ $('Response Guard').item.json.agentResponse }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "999febc1-684b-417a-935f-455e210f103e",
+      "name": "Send Mill Telegram Response1",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        -1824,
+        7088
+      ],
+      "webhookId": "f22391f6-ebfc-43cf-9a89-2c9d2f34630a",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Response Guard').item.json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Chats",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "date": "={{ $('Response Guard').item.json.today }}",
+            "sessionId": "={{ $('Response Guard').item.json.sessionId }}",
+            "agentId": "={{ $('Response Guard').item.json.agentId }}",
+            "role": "assistant",
+            "content": "={{ $('Response Guard').item.json.agentResponse }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "agentId",
+              "displayName": "agentId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "86561389-63f3-4331-acd8-0954149eac9a",
+      "name": "Write Agent Response to Memory1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2016,
+        7088
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── RESPONSE GUARD ──────────────────────────────────────────────────────────\n// Sits between Execute Mill/Chatur and memory + Telegram.\n// Normalizes any response format and guards against empty/JSON/malformed output.\n// Sanitizes Telegram Markdown entities to prevent 400 Bad Request parser errors.\n\nconst input = $input.item.json;\n\n// 1. Pick up agentId and raw response from the standard contract\nconst agentId = input.agent || input.agentId || 'mill';\nlet response   = input.response ?? input.output ?? input.agentResponse ?? input.text ?? '';\n\n// 2. Convert to string\nresponse = String(response).trim();\n\n// 3. Strip markdown code fences\nresponse = response\n  .replace(/^```(?:json|text|markdown|plain)?\\s*/i, '')\n  .replace(/\\s*```$/i, '')\n  .trim();\n\n// 4. If model accidentally wrapped in JSON, unwrap it\ntry {\n  const parsed = JSON.parse(response);\n  if (parsed !== null && typeof parsed === 'object') {\n    response =\n      parsed.response ??\n      parsed.message ??\n      parsed.text ??\n      parsed.output ??\n      response;\n    response = String(response).trim();\n  }\n} catch (e) {}\n\n// 5. Strip the 'Chatur says:' / 'Mill says:' prefixes if still present\nresponse = response.replace(/^(chatur|mill)\\s+says:\\s*/i, '').trim();\n\n// 6. TELEGRAM MARKDOWN SANITIZER (Fixes byte offset 400 parse errors)\n// A. Convert asterisk/hyphen bullet markers to unicode bullet dots so they never conflict with bold entities\nresponse = response.replace(/^(\\s*)[*+-]\\s+/gm, '$1• ');\n\n// B. Convert double-asterisk **bold** to single *bold*\nresponse = response.replace(/\\*\\*([^\\*\\n]+)\\*\\*/g, '*$1*');\n\n// C. Balance asterisks\nlet asteriskCount = (response.match(/\\*/g) || []).length;\nif (asteriskCount % 2 !== 0) {\n  const lastIdx = response.lastIndexOf('*');\n  if (lastIdx !== -1) {\n    response = response.substring(0, lastIdx) + response.substring(lastIdx + 1);\n  }\n}\n\n// D. Balance underscores\nlet underscoreCount = (response.match(/_/g) || []).length;\nif (underscoreCount % 2 !== 0) {\n  const lastUnderscore = response.lastIndexOf('_');\n  if (lastUnderscore !== -1) {\n    response = response.substring(0, lastUnderscore) + response.substring(lastUnderscore + 1);\n  }\n}\n\n// 7. Final empty guard\nif (!response || response.length < 2) {\n  response = \"Sorry, I couldn't generate a response. Please try again! 🙏\";\n}\n\n// 8. Pull in context for memory writes\nconst ctx = $('Build Messages Array').item.json;\n\nreturn {\n  json: {\n    chatId:        ctx.chatId,\n    sheetId:       ctx.sheetId,\n    firstName:     ctx.firstName,\n    source:        ctx.source,\n    sessionId:     ctx.sessionId,\n    today:         ctx.today,\n    agentId:       agentId,\n    agentResponse: response\n  }\n};"
+      },
+      "id": "39d46126-9c03-47c4-92ed-383c30ec8407",
+      "name": "Response Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2256,
+        7088
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const users = $input.all();\n    const currentChatId = $('Extract Telegram Metadata').item.json.chatId;\n    \n    const validUsers = users.filter(u => u.json && u.json.chatId && u.json.chatId != '');\n    const foundUser = validUsers.find(u => u.json.chatId == currentChatId);\n    \n    if (foundUser && foundUser.json && foundUser.json.sheetId) {\n      return {\n        json: {\n          ...$('Extract Telegram Metadata').item.json,\n          isRegisteredUser: true,\n          sheetId: foundUser.json.sheetId,\n          appToken: foundUser.json.appToken\n        }\n      };\n    } else {\n      return {\n        json: {\n          ...$('Extract Telegram Metadata').item.json,\n          isRegisteredUser: false\n        }\n      };\n    }"
+      },
+      "id": "e2673c94-ffca-4b29-9ba2-ec0f41467b78",
+      "name": "Is User Registered?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4928,
+        7184
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 983886894,
+          "mode": "list",
+          "cachedResultName": "Users",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit#gid=983886894"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "chatId",
+              "lookupValue": "={{ $('Extract Telegram Metadata').item.json.chatId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ff6b77d9-fa6b-439f-af0c-8924d4d91ac8",
+      "name": "Lookup User in Master Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -5136,
+        7184
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.source }}",
+              "operation": "startsWith",
+              "value2": "android_sms"
+            }
+          ]
+        }
+      },
+      "id": "786d20dd-6599-44d7-95c0-3d8325b5eb24",
+      "name": "Is Android SMS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -4256,
+        6896
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sms's",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "chatId": "={{ $json.chatId }}",
+            "source": "={{ $json.source }}",
+            "content": "={{ $json.text }}",
+            "status": "Pending",
+            "sheetId": "={{ $json.sheetId }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9910c115-8451-4681-90af-70956b5ea660",
+      "name": "Write SMS to Pending Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3440,
+        6592
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Q3nDt6OmmgkiJLja",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Q3nDt6OmmgkiJLja",
+          "cachedResultName": "SMS Processor Workflow"
+        },
+        "options": {}
+      },
+      "id": "605e830c-fc89-4c0b-a874-7734bc5f0953",
+      "name": "Execute SMS Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        -3232,
+        6592
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isBulk }}"
+            }
+          ]
+        }
+      },
+      "id": "a0f425fe-b862-42fd-b4b9-eba2490bfee1",
+      "name": "Is Realtime? (Not Bulk)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -3712,
+        6608
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VJN9AW1OcakFKUmd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VJN9AW1OcakFKUmd",
+          "cachedResultName": "Sevai Fixes - Dev Prompt Upgrade"
+        },
+        "options": {}
+      },
+      "id": "76d4a895-0df7-4aa1-931b-5788ca8f4bf0",
+      "name": "Execute Dev Bulk Ingest",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        -3488,
+        6816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Event Normalizer').first().json;\nconst devResult = $input.first().json || {};\nconst analytics = item.analytics || {};\n\nconst insertedCount = devResult.insertedCount !== undefined ? devResult.insertedCount : (analytics.totalCount || 0);\nconst skippedCount = devResult.skippedCount || 0;\nconst totalSpent = (analytics.totalSpent || 0).toLocaleString('en-IN');\nconst totalIncome = (analytics.totalIncome || 0).toLocaleString('en-IN');\n\nlet catLines = '';\nif (analytics.topCategories && analytics.topCategories.length > 0) {\n  catLines = analytics.topCategories.slice(0, 4).map(c => {\n    return `• ${c.category}: ₹${c.total.toLocaleString('en-IN')} (${c.count} txs)`;\n  }).join('\\n');\n} else {\n  catLines = '• General Expenses logged';\n}\n\nconst maxLine = analytics.maxExpense > 0 ? `📈 *Largest Expense:* ₹${analytics.maxExpense.toLocaleString('en-IN')} (${analytics.maxVendor})` : '';\nconst minLine = analytics.minExpense > 0 ? `📉 *Smallest Spend:* ₹${analytics.minExpense.toLocaleString('en-IN')} (${analytics.minVendor})` : '';\n\nconst message = `📲 *1-Month Spending Pretext Synced!*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ *${insertedCount} Transactions Logged*\n${skippedCount > 0 ? `⚠️ *${skippedCount} Duplicates Skipped*\\n` : ''}💰 *Total Spent:* ₹${totalSpent}${analytics.totalIncome > 0 ? ` | *Earned:* ₹${totalIncome}` : ''}\n\n📊 *Key Spending Categories:*\n${catLines}\n${maxLine ? `\\n${maxLine}` : ''}${minLine ? `\\n${minLine}` : ''}\n\n✨ _Your historical pretext is loaded! Your charts, trend analytics, and coach insights are now active._\n🔗 [Open Live Dashboard](http://localhost:3000/?sheetId=${item.sheetId})`;\n\nreturn {\n  json: {\n    chatId: item.chatId,\n    sheetId: item.sheetId,\n    summaryText: message,\n    success: true,\n    insertedCount,\n    skippedCount\n  }\n};"
+      },
+      "id": "43717e32-8af3-46d9-97f7-40824c0e9cb5",
+      "name": "Format Bulk Pretext Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3248,
+        6816
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.summaryText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "26bb970f-03dd-4f11-aaa5-febd68a0e64b",
+      "name": "Send Bulk Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        -3056,
+        6832
+      ],
+      "webhookId": "0b681ef2-bab7-4d0f-b412-5d2e38ed34b7",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find Chat ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Chat ID": {
+      "main": [
+        [
+          {
+            "node": "Send Error Telegram Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Extract Telegram Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Branch Onboarding vs Chat1": {
+      "main": [
+        [
+          {
+            "node": "Event Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Google OAuth State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Android SMS Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Lookup User by App Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup User by App Token": {
+      "main": [
+        [
+          {
+            "node": "Validate App Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate App Token": {
+      "main": [
+        [
+          {
+            "node": "Event Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Normalizer": {
+      "main": [
+        [
+          {
+            "node": "Is Android SMS?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Chat Memory1": {
+      "main": [
+        [
+          {
+            "node": "Build Messages Array",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Messages Array": {
+      "main": [
+        [
+          {
+            "node": "Decision Brain (JEV 2B Router)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Write User Message to Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Google OAuth State": {
+      "main": [
+        [
+          {
+            "node": "Save OAuth Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save OAuth Pending": {
+      "main": [
+        [
+          {
+            "node": "Generate Google OAuth URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Google OAuth URL": {
+      "main": [
+        [
+          {
+            "node": "Send Google Verification Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Brain (JEV 2B Router)": {
+      "main": [
+        [
+          {
+            "node": "Parse Route Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Route Decision": {
+      "main": [
+        [
+          {
+            "node": "Route Switch (Mill or Chatur)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Switch (Mill or Chatur)": {
+      "main": [
+        [
+          {
+            "node": "Execute Chatur",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Mill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Mill": {
+      "main": [
+        [
+          {
+            "node": "Response Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Chatur": {
+      "main": [
+        [
+          {
+            "node": "Response Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Telegram Metadata": {
+      "main": [
+        [
+          {
+            "node": "Lookup User in Master Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Guard": {
+      "main": [
+        [
+          {
+            "node": "Send Mill Telegram Response1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Write Agent Response to Memory1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is User Registered?": {
+      "main": [
+        [
+          {
+            "node": "Branch Onboarding vs Chat1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup User in Master Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Is User Registered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Android SMS?": {
+      "main": [
+        [
+          {
+            "node": "Is Realtime? (Not Bulk)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Chat Memory1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write SMS to Pending Sheet": {
+      "main": [
+        [
+          {
+            "node": "Execute SMS Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Realtime? (Not Bulk)": {
+      "main": [
+        [
+          {
+            "node": "Write SMS to Pending Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Dev Bulk Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Dev Bulk Ingest": {
+      "main": [
+        [
+          {
+            "node": "Format Bulk Pretext Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Bulk Pretext Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Bulk Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "bf83a0b4-6cb0-44d9-89dd-54a887a2a90b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "KlFOAeS5bbWodss6",
+  "tags": []
+}

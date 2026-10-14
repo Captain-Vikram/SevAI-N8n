@@ -1,0 +1,392 @@
+{
+  "name": "SevAI - Daily Param Analyst",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "a698caf2-9d02-4c40-93c0-5f7a70770440",
+      "name": "Daily Param Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "list",
+          "cachedResultName": "Sevai Bot Master",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 983886894,
+          "mode": "list",
+          "cachedResultName": "Users",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE/edit#gid=983886894"
+        },
+        "options": {}
+      },
+      "id": "b2a23d04-fc13-4681-aa79-e6250c8824c8",
+      "name": "Get All Registered Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1168,
+        720
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst validUsers = items\n  .map(i => i.json)\n  .filter(u => u && u.sheetId && String(u.sheetId).trim() !== '');\n\nif (validUsers.length === 0) {\n  throw new Error('No registered users with valid sheetId found in Users sheet.');\n}\n\nreturn validUsers.map(u => ({ json: u }));"
+      },
+      "id": "6cd16850-537e-48f3-bb55-e361c78753d2",
+      "name": "Filter Valid Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "3cf88649-e84f-48bb-ae6d-8cee158d2678",
+      "name": "Loop Over Users",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1616,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "15b8c9ae-e62d-4e24-8fdd-d547ec0e3779",
+      "name": "Read User Transactions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1840,
+        720
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let currentUser = null;\ntry {\n  currentUser = $('Loop Over Users').item.json;\n} catch (e) {}\n\nif (!currentUser || !currentUser.sheetId) {\n  try {\n    const loopItems = $('Loop Over Users').all();\n    if (loopItems && loopItems.length > 0) currentUser = loopItems[0].json;\n  } catch (e) {}\n}\n\nif (!currentUser || !currentUser.sheetId) {\n  try {\n    const allUsers = $('Filter Valid Users').all().map(i => i.json);\n    const loopContext = $('Loop Over Users').context;\n    const runIdx = (loopContext && loopContext.currentRunIndex) || 0;\n    currentUser = allUsers[runIdx] || allUsers[0];\n  } catch (e) {}\n}\n\ncurrentUser = currentUser || { firstName: 'User', sheetId: '', chatId: '' };\n\nconst rawRows = $('Read User Transactions').all().map(i => i.json);\n\nconst txs = rawRows.filter(t => t && Object.keys(t).length > 0 && t.amount !== undefined && t.amount !== '' && String(t.type || '').toLowerCase() !== 'deleted');\n\nif (txs.length === 0) {\n  return [{\n    json: {\n      hasTransactions: false,\n      sheetId: currentUser.sheetId,\n      chatId: currentUser.chatId,\n      firstName: currentUser.firstName || 'User',\n      txCount: 0,\n      insightsText: '👋 Hey ' + (currentUser.firstName || 'there') + '! Your financial dashboard is active. Start logging your daily expenses or income on Telegram, and I will generate your personalized spending analysis and habit tips here!'\n    }\n  }];\n}\n\nlet totalSpent = 0;\nlet totalIncome = 0;\nlet categories = {};\nlet vendors = {};\nlet maxExpense = { amount: 0, vendor: 'None', category: 'None' };\nlet weekendTx = 0;\nlet weekdayTx = 0;\nlet smallTxCount = 0;\n\ntxs.forEach(t => {\n  const cleanAmt = parseFloat(String(t.amount).replace(/[^0-9.]/g, '')) || 0;\n  if (cleanAmt <= 0) return;\n  const isIncome = String(t.type || '').toLowerCase() === 'income' || String(t.type || '').toLowerCase() === 'credit';\n  const cat = String(t.category || 'Other').trim();\n  const vendor = String(t.vendor || t.description || 'Unknown').trim();\n\n  if (isIncome) {\n    totalIncome += cleanAmt;\n  } else {\n    totalSpent += cleanAmt;\n    categories[cat] = (categories[cat] || 0) + cleanAmt;\n    vendors[vendor] = (vendors[vendor] || 0) + cleanAmt;\n    if (cleanAmt > maxExpense.amount) {\n      maxExpense = { amount: cleanAmt, vendor, category: cat };\n    }\n    if (cleanAmt < 50) {\n      smallTxCount++;\n    }\n  }\n\n  if (t.date) {\n    const d = new Date(t.date);\n    if (!isNaN(d.getTime())) {\n      const day = d.getDay();\n      if (day === 0 || day === 6) weekendTx++;\n      else weekdayTx++;\n    }\n  }\n});\n\nconst sortedCats = Object.entries(categories).sort((a,b) => b[1] - a[1]);\nconst sortedVendors = Object.entries(vendors).sort((a,b) => b[1] - a[1]);\n\nconst topCatsFormatted = sortedCats.slice(0, 4).map(([c, amt]) => {\n  const pct = totalSpent > 0 ? ((amt / totalSpent) * 100).toFixed(1) : '0';\n  return c + ': ₹' + amt.toLocaleString('en-IN') + ' (' + pct + '%)';\n});\n\nconst topVendorsFormatted = sortedVendors.slice(0, 4).map(([v, amt]) => {\n  return v + ': ₹' + amt.toLocaleString('en-IN');\n});\n\nconst netBalance = totalIncome - totalSpent;\nconst savingsRate = totalIncome > 0 ? (((totalIncome - totalSpent) / totalIncome) * 100).toFixed(1) : 0;\n\nconst userPromptText = 'Financial Summary for ' + (currentUser.firstName || 'User') + ':\\n' +\n'- Total Transactions: ' + txs.length + '\\n' +\n'- Total Income: ₹' + totalIncome.toLocaleString('en-IN') + '\\n' +\n'- Total Spent: ₹' + totalSpent.toLocaleString('en-IN') + '\\n' +\n'- Net Surplus / Savings: ₹' + netBalance.toLocaleString('en-IN') + ' (' + savingsRate + '% savings rate)\\n' +\n'- Largest Single Spend: ₹' + maxExpense.amount.toLocaleString('en-IN') + ' on ' + maxExpense.vendor + ' (' + maxExpense.category + ')\\n' +\n'- Top Spending Categories:\\n  ' + (topCatsFormatted.join('\\n  ') || 'None') + '\\n' +\n'- Top Vendors / Recipients:\\n  ' + (topVendorsFormatted.join('\\n  ') || 'None') + '\\n' +\n'- Transaction Rhythm: ' + weekdayTx + ' weekday txs vs ' + weekendTx + ' weekend txs\\n' +\n'- Micro-transactions (<₹50): ' + smallTxCount + ' purchases\\n\\n' +\n'Analyze these exact spending figures and provide 3 to 4 actionable, grounded bullet points for ' + (currentUser.firstName || 'the user') + '.';\n\nreturn [{\n  json: {\n    hasTransactions: true,\n    sheetId: currentUser.sheetId,\n    chatId: currentUser.chatId,\n    firstName: currentUser.firstName || 'User',\n    txCount: txs.length,\n    totalSpent,\n    totalIncome,\n    netBalance,\n    userPromptText\n  }\n}];"
+      },
+      "id": "96915ce9-ccc8-4cf6-a04e-23cc8f09fc4d",
+      "name": "Prepare Analytics for User",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasTransactions }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "7dad63a5-53c3-4182-bacd-552da57d1d7b",
+      "name": "Has Transactions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2272,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.29.141:1234/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gemma-4-e2b-it\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are \\\"Param\\\", the sharp and supportive Financial Analyst for SevAI.\\nAnalyze the user's spending data and deliver high-value, grounded intelligence.\\n\\nRules:\\n1. Write 3 to 4 concise bullet points.\\n2. Structure each bullet like this:\\n• [Category or Habit Name]: [Observed pattern with actual numbers] → [Direct, practical recommendation or praise].\\n3. Grounding: Cite ONLY numbers provided in the summary. Never invent numbers.\\n4. Keep each bullet under 200 characters.\\n5. Address major spending drains, cash flow surplus, and recurring micro-spends.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.userPromptText) }}\n    }\n  ],\n  \"temperature\": 0.3\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "60cd522f-f4ca-45ce-ba3d-421494496138",
+      "name": "Param Analyst (LM Studio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2512,
+        608
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Analytics for User').all()[0]?.json || {}; return [{ json: { insightsText: prep.insightsText || '' } }];"
+      },
+      "id": "42a7621d-5de6-43f7-9192-5dd305d5adb6",
+      "name": "Starter Insight Generator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first()?.json || {};\nconst prep = $('Prepare Analytics for User').all()[0]?.json || {};\n\nlet content = '';\n\nif (item.choices && item.choices.length > 0 && item.choices[0].message) {\n  content = item.choices[0].message.content || '';\n} else if (item.insightsText) {\n  content = item.insightsText;\n} else {\n  content = typeof item === 'string' ? item : JSON.stringify(item);\n}\n\n// Clean reasoning / think tags if local LLM includes them\ncontent = content.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();\n\nif (!content || content.length < 10) {\n  content = '• Healthy Tracking: Successfully monitored ' + (prep.txCount || 0) + ' transactions. Total spend is ₹' + (prep.totalSpent || 0).toLocaleString('en-IN') + ' against income of ₹' + (prep.totalIncome || 0).toLocaleString('en-IN') + '.';\n}\n\nreturn [{\n  json: {\n    sheetId: prep.sheetId,\n    chatId: prep.chatId,\n    firstName: prep.firstName,\n    generatedAt: new Date().toISOString(),\n    insights: content,\n    basedOnTxCount: prep.txCount || 0\n  }\n}];"
+      },
+      "id": "a7f49c98-4e73-4005-bebe-863ba2d5d110",
+      "name": "Format Final Insight",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1620811503,
+          "mode": "list",
+          "cachedResultName": "Insights",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1WLu5KwzHFhJywH3PeZLC2Chjm8zGS5QghGe_DhSXY-I/edit#gid=1620811503"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b25b6e7b-611d-442c-92af-4ad73d0b43d7",
+      "name": "Write Insights to User Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2976,
+        720
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Param Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Registered Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Registered Users": {
+      "main": [
+        [
+          {
+            "node": "Filter Valid Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Valid Users": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Users": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Read User Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read User Transactions": {
+      "main": [
+        [
+          {
+            "node": "Prepare Analytics for User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Analytics for User": {
+      "main": [
+        [
+          {
+            "node": "Has Transactions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Transactions?": {
+      "main": [
+        [
+          {
+            "node": "Param Analyst (LM Studio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Starter Insight Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Param Analyst (LM Studio)": {
+      "main": [
+        [
+          {
+            "node": "Format Final Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Starter Insight Generator": {
+      "main": [
+        [
+          {
+            "node": "Format Final Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Final Insight": {
+      "main": [
+        [
+          {
+            "node": "Write Insights to User Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Insights to User Sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0f72da13-6a7b-42c2-88c8-bfe2d6f7c060",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "OFbXDi1TyauI7uVH",
+  "tags": []
+}

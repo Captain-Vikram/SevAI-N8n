@@ -1,0 +1,443 @@
+{
+  "name": "SMS Processor Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "97f6847f-1c48-40b5-a029-74c3bb033a86",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        288,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "18mebbKFaM7F-M4ntTROQ2BdZVU79nSTQNd0-TABokqE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Users",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "31e45f99-5ab6-4f2e-9735-2b4db30c5a34",
+      "name": "Get All Registered Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        -48
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sms's",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "922df6f3-ded6-4db9-b893-791b411a90d3",
+      "name": "Read SMS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        688,
+        -48
+      ],
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status || $json.Status }}",
+              "value2": "Pending"
+            }
+          ]
+        }
+      },
+      "id": "46c7972b-e015-44e5-a841-7492b80c5166",
+      "name": "Is Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        848,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  json: {\n    query: $input.item.json.content,\n    sheetId: $input.item.json.sheetId || $('Read SMS').item.json.sheetId,\n    row_number: $input.item.json.row_number,\n    chatId: $input.item.json.chatId\n  }\n};"
+      },
+      "id": "9221607c-a277-4e7a-8334-46bfbca3bec1",
+      "name": "Prepare Dev Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VJN9AW1OcakFKUmd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VJN9AW1OcakFKUmd",
+          "cachedResultName": "Sevai Fixes - Dev Prompt Upgrade"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "9bab3b98-c0a7-477f-85f5-160c272be6a8",
+      "name": "Execute Dev_Transaction_Tool",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Prepare Dev Input').item.json.chatId }}",
+        "text": "={{ $json.response || 'Successfully processed SMS.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "c27f3dfd-ebdb-4f03-8a00-bd81c4f72cae",
+      "name": "Notify User",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1808,
+        -144
+      ],
+      "webhookId": "215ebea9-3c81-499a-9e32-7f844dd1d2d2",
+      "credentials": {
+        "telegramApi": {
+          "id": "BUxooVonMEeyk6N8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "7acf54b5-ffd1-4ded-8a9b-010f13751e92",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        288,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const devOutput = $input.item.json;\nreturn {\n  json: {\n    ...devOutput,\n    row_number: $('Prepare Dev Input').item.json.row_number,\n    sms_status: 'Processed'\n  }\n};"
+      },
+      "id": "5cbf7054-6921-4525-9397-90b63ae9d018",
+      "name": "Restore Row Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Prepare Dev Input').item.json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sms's",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "95d400f8-beb8-4727-9cb7-43604e0b1f06",
+      "name": "Update SMS Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1584,
+        -112
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Prepare Dev Input').item.json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Chats",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "db2500f5-6604-49fa-afeb-c78a312ee084",
+      "name": "Write SMS to Memory1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2032,
+        -128
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Prepare Dev Input').item.json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Chats",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "bf63037b-931f-4529-860b-c3c11d1795cf",
+      "name": "Write Agent Response to Memory1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2304,
+        -208
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Registered Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Registered Users": {
+      "main": [
+        [
+          {
+            "node": "Read SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read SMS": {
+      "main": [
+        [
+          {
+            "node": "Is Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Pending?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Dev Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Dev_Transaction_Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Dev_Transaction_Tool": {
+      "main": [
+        [
+          {
+            "node": "Restore Row Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify User": {
+      "main": [
+        [
+          {
+            "node": "Write SMS to Memory1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Registered Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Row Data": {
+      "main": [
+        [
+          {
+            "node": "Update SMS Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update SMS Status": {
+      "main": [
+        [
+          {
+            "node": "Notify User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write SMS to Memory1": {
+      "main": [
+        [
+          {
+            "node": "Write Agent Response to Memory1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "043dc5a3-45d8-4659-aeae-30fc9c3316e7",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "Q3nDt6OmmgkiJLja",
+  "tags": []
+}

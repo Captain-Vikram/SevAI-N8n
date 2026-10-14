@@ -1,0 +1,475 @@
+{
+  "name": "Sevai Fixes - Dev Prompt Upgrade",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "03dc1955-f33b-4b8e-8f3a-51ceff5517c2",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        432,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nlet rawQuery = '';\nlet sheetId = input.sheetId || '';\nlet directTransactions = null;\n\n// 1. Support direct transactions array passing: { transactions: [...] }\nif (Array.isArray(input.directTransactions) && input.directTransactions.length > 0) {\n  directTransactions = input.directTransactions;\n} else if (Array.isArray(input.transactions) && input.transactions.length > 0) {\n  directTransactions = input.transactions;\n}\n\n// 2. If input.query is an object: { query: '...', sheetId: '...' }\nif (input.query && typeof input.query === 'object') {\n  if (Array.isArray(input.query.directTransactions)) {\n    directTransactions = input.query.directTransactions;\n  } else if (Array.isArray(input.query.transactions)) {\n    directTransactions = input.query.transactions;\n  }\n  rawQuery = input.query.query || input.query.text || '';\n  if (!sheetId && input.query.sheetId) {\n    sheetId = input.query.sheetId;\n  }\n} else if (typeof input.query === 'string') {\n  rawQuery = input.query;\n} else if (typeof input.text === 'string') {\n  rawQuery = input.text;\n} else if (Array.isArray(input.queries)) {\n  rawQuery = input.queries.join('\\n');\n}\n\n// 3. If rawQuery is not a string, stringify safely\nif (typeof rawQuery !== 'string') {\n  try {\n    rawQuery = JSON.stringify(rawQuery);\n  } catch(e) {\n    rawQuery = '';\n  }\n}\n\n// 4. Extract sheetId if embedded in text\nconst match = rawQuery.match(/sheetId:\\s*([^\\s\\n\\r]+)/i);\nif (match && !sheetId) {\n  sheetId = match[1].trim();\n}\n\n// 5. Clean rawQuery to pure message text\nrawQuery = rawQuery\n  .replace(/^query:\\s*/i, '')\n  .replace(/sheetId:\\s*([^\\s\\n\\r]+)/ig, '')\n  .trim();\n\n// 6. Final fallback for sheetId from any nested property\nif (!sheetId) {\n  for (const k of Object.keys(input)) {\n    if (typeof input[k] === 'object' && input[k] && input[k].sheetId) {\n      sheetId = input[k].sheetId;\n      break;\n    }\n  }\n}\n\n// --- HYBRID CLASSIFICATION: REGEX STRUCTURAL ANCHOR LAYER ---\nconst amountRegex = /(?:rs\\.?|inr|rupees|₹|\\$)?\\s*(\\d+(?:,\\d+)*(?:\\.\\d{1,2})?)\\s*(?:rs\\.?|inr|rupees|₹)?/gi;\nconst amounts = [];\nlet am;\nwhile ((am = amountRegex.exec(rawQuery)) !== null) {\n  const rawNum = am[1].replace(/,/g, '');\n  const val = parseFloat(rawNum);\n  const isYear = val >= 2020 && val <= 2030 && !/(?:rs|inr|rupees|₹|\\$)/i.test(am[0]);\n  if (val > 0 && !isYear) {\n    const prefix = rawQuery.substring(Math.max(0, am.index - 10), am.index).toLowerCase();\n    if (!/\\b(?:order|txn|ref|id|otp|code|#)\\s*:?$/i.test(prefix)) {\n      amounts.push(val);\n    }\n  }\n}\n\nlet direction = 'unknown';\nif (/\\b(?:received|got|credited|deposit|salary|refund|cashback|earned|won|income)\\b/i.test(rawQuery)) {\n  direction = 'credit';\n} else if (/\\b(?:spent|paid|bought|debited|debit|charged|purchased|cost|sent|transferred|loss)\\b/i.test(rawQuery)) {\n  direction = 'debit';\n}\n\nlet medium = 'other';\nif (/\\b(?:upi|gpay|phonepe|paytm|bhim|vpa)\\b/i.test(rawQuery)) {\n  medium = 'upi';\n} else if (/\\b(?:card|pos|atm)\\b/i.test(rawQuery)) {\n  medium = 'card';\n} else if (/\\b(?:bank|neft|rtgs|imps|account|ac|a\\/c)\\b/i.test(rawQuery)) {\n  medium = 'bank';\n} else if (/\\b(?:cash)\\b/i.test(rawQuery)) {\n  medium = 'cash';\n}\n\nconst catHints = [];\nif (/\\b(?:swiggy|zomato|zepto|blinkit|eat|food|cafe|restaurant|tea|chai|coffee|mcdonald|kfc|starbucks|domino|pizza|dine|biryani|lunch|dinner|breakfast|snacks)\\b/i.test(rawQuery)) {\n  catHints.push('Food & Dining');\n}\nif (/\\b(?:uber|ola|rapido|metro|irctc|railway|train|flight|bus|auto|cab|petrol|fuel|shell|hp|indianoil)\\b/i.test(rawQuery)) {\n  catHints.push('Travel');\n}\nif (/\\b(?:amazon|flipkart|myntra|meesho|zara|h&m|nykaa|ajio|croma|shopping|store|mart|mall|sunscreen|toner|serum)\\b/i.test(rawQuery)) {\n  catHints.push('Shopping');\n}\nif (/\\b(?:electricity|water|gas|wifi|broadband|airtel|jio|vi|bill|recharge|dth|rent)\\b/i.test(rawQuery)) {\n  catHints.push('Bills & Utilities');\n}\nif (/\\b(?:salary|payroll|stipend)\\b/i.test(rawQuery)) {\n  catHints.push('Salary Income');\n}\n\nconst anchorList = [];\nif (amounts.length > 0) anchorList.push(`Detected Amounts: [${[...new Set(amounts)].join(', ')}]`);\nif (direction !== 'unknown') anchorList.push(`Direction Signal: ${direction}`);\nif (medium !== 'other') anchorList.push(`Medium: ${medium}`);\nif (catHints.length > 0) anchorList.push(`Likely Categories: [${[...new Set(catHints)].join(', ')}]`);\n\nconst regexAnchors = anchorList.join(' | ') || 'None';\n\n\n// --- FAST-PATH DETECTION FOR UNAMBIGUOUS TRANSACTIONS ---\nlet matchedVendor = '';\nconst vendorRules = [\n  { regex: /\\b(swiggy|zomato|zepto|blinkit|mcdonald'?s?|kfc|starbucks|domino'?s?|subway|pizza hut|burger king|chai point|chaayos)\\b/i, category: 'Food & Dining' },\n  { regex: /\\b(uber|ola|rapido|irctc|redbus|makemytrip|indigo|air india|petrol|fuel|shell|hp pump)\\b/i, category: 'Travel' },\n  { regex: /\\b(amazon|flipkart|myntra|meesho|nykaa|ajio|zara|h&m|croma|reliance digital|dmart)\\b/i, category: 'Shopping' },\n  { regex: /\\b(airtel|jio|vi|vodafone|bescom|tneb|adani electricity|tata power|rent|wifi)\\b/i, category: 'Bills & Utilities' },\n  { regex: /\\b(cult\\.?fit|apollo pharmacy|pharmeasy|netmeds|1mg)\\b/i, category: 'Health & Fitness' }\n];\n\nfor (const rule of vendorRules) {\n  const m = rawQuery.match(rule.regex);\n  if (m) {\n    matchedVendor = m[1];\n    if (!catHints.includes(rule.category)) catHints.push(rule.category);\n    break;\n  }\n}\n\nlet skipLLM = false;\nif (directTransactions && Array.isArray(directTransactions) && directTransactions.length > 0) {\n  skipLLM = true;\n} else if (amounts.length === 1 && direction !== 'unknown' && matchedVendor) {\n  // Clean single transaction with high confidence\n  directTransactions = [{\n    amount: amounts[0],\n    type: direction === 'credit' ? 'credit' : 'debit',\n    targetParty: matchedVendor.charAt(0).toUpperCase() + matchedVendor.slice(1),\n    category: catHints[0] || 'Shopping',\n    medium: medium,\n    description: rawQuery,\n    confidence: 'HIGH'\n  }];\n  skipLLM = true;\n}\n\nreturn {\n  json: {\n    ...input,\n    query: rawQuery,\n    sheetId: sheetId,\n    directTransactions: directTransactions,\n    skipLLM: skipLLM,\n    regexAnchors: regexAnchors,\n    detectedAmounts: [...new Set(amounts)],\n    detectedDirection: direction\n  }\n};"
+      },
+      "id": "cbd107b2-f94b-4f5d-900d-d692cd0deb6c",
+      "name": "Input Normalizer1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.29.141:1234/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gemma-4-e2b-it\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are DEV, a financial transaction classifier.\\n\\nYour ONLY job is to determine whether the input contains a REAL, COMPLETED financial transaction and, if it does, extract the transaction into the required JSON schema.\\n\\nDo NOT chat.\\nDo NOT explain.\\nDo NOT give advice.\\nDo NOT summarize.\\nDo NOT use markdown.\\nDo NOT output anything outside the JSON object.\\n\\nDECISION:\\nA message is a transaction when it describes an expense, purchase, money spent, or money received, EVEN IN SHORTHAND, lists, or multiple transactions at once.\\n\\nVALID (ALWAYS EXTRACT):\\n- I spent 500 on Swiggy\\n- Paid Rs 850 at Starbucks\\n- Received 20000 salary\\n- sunscreen of 212 and a toner of 311 (VALID: 2 items!)\\n- 1. coffee 50\\n2. lunch 120\\n3. metro 40 (VALID: extract all items!)\\n- sunscreen 240\\n- toner of 383 rupees\\n- bought toner for 311\\n- coffee 150\\n- auto 50 rs\\n- 20 on snacks\\n- Rs 500 debited from my account\\n- Sent 1000 to Rahul\\n- Got 2000 from Amazon refund\\n\\nINVALID:\\n- How much did I spend?\\n- I want to spend Rs 500\\n- Should I spend Rs 500?\\n- I might buy a phone for 40000\\n- advertisements\\n- OTP messages\\n- balance-only messages\\n- offers or warnings\\n- questions about transactions\\n\\nOUTPUT FORMAT:\\n1. If NOT a transaction:\\n{\\\"isNull\\\": true, \\\"confidence\\\": \\\"HIGH\\\", \\\"missing\\\": []}\\n\\n2. If MULTIPLE transactions or a list in input:\\n{\\\"isNull\\\": false, \\\"transactions\\\": [\\n  {\\\"amount\\\": 212, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"sunscreen\\\", \\\"category\\\": \\\"Shopping\\\", \\\"medium\\\": \\\"other\\\", \\\"date_of_transaction\\\": \\\"\\\"},\\n  {\\\"amount\\\": 311, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"toner\\\", \\\"category\\\": \\\"Shopping\\\", \\\"medium\\\": \\\"other\\\", \\\"date_of_transaction\\\": \\\"\\\"}\\n]}\\n\\n3. If SINGLE transaction:\\n{\\\"isNull\\\": false, \\\"amount\\\": 311, \\\"type\\\": \\\"debit\\\", \\\"targetParty\\\": \\\"toner\\\", \\\"currency\\\": \\\"INR\\\", \\\"medium\\\": \\\"other\\\", \\\"category\\\": \\\"Shopping\\\", \\\"description\\\": \\\"\\\", \\\"date_of_transaction\\\": \\\"\\\", \\\"confidence\\\": \\\"HIGH\\\", \\\"missing\\\": []}\\n\\nFIELD RULES:\\namount: Number only. Never a string.\\ntype: Only \\\"debit\\\" or \\\"credit\\\".\\ncurrency: Use \\\"INR\\\" for Rs, INR or Indian rupee references.\\nmedium: Only one of: \\\"upi\\\" \\\"card\\\" \\\"bank\\\" \\\"other\\\"\\ncategory: Only one of: \\\"Transfer\\\" \\\"Food & Dining\\\" \\\"Shopping\\\" \\\"Travel\\\" \\\"Entertainment\\\" \\\"Bills & Utilities\\\" \\\"Health\\\" \\\"Other\\\"\\n\\nIMPORTANT: Do not invent details. If shorthand item name is given (e.g. sunscreen, toner, snacks), use it as targetParty.\\n\\nJSON ONLY. NO MARKDOWN. NO EXPLANATION.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Context date: {{ new Date().toISOString() }}\\nInput: {{ $json.query }}\\n\\nRegex Structural Anchors (for guidance):\\n{{ $json.regexAnchors || 'None' }}\\n\\nUse your general AI understanding to evaluate the message in context with these anchors. Discern real completed transactions from intent/inquiries, and extract the clean transaction schema.\"\n    }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 3000\n}",
+        "options": {}
+      },
+      "id": "7170b9fb-3e87-46dd-b9e5-500c1ba55e83",
+      "name": "Dev Agent - Classifier1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        928,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const norm = $('Input Normalizer1').item.json;\nconst rawInput = $input.item.json;\nconst content = rawInput?.choices?.[0]?.message?.content || '';\nconst reasoning = rawInput?.choices?.[0]?.message?.reasoning_content || '';\nconst rawText = content.trim() || reasoning.trim();\n\nlet devData = null;\n\n// If direct transactions were provided in the input, use them directly\nif (norm.directTransactions && Array.isArray(norm.directTransactions) && norm.directTransactions.length > 0) {\n  devData = { isNull: false, transactions: norm.directTransactions };\n}\n\nif (!devData && rawText) {\n  try {\n    const cleaned = rawText\n      .replace(/<think>[\\s\\S]*?<\\/think>/gi, '')\n      .replace(/```json/gi, '')\n      .replace(/```/gi, '')\n      .trim();\n\n    const match = cleaned.match(/(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])/);\n    if (match) {\n      const parsed = JSON.parse(match[0]);\n      if (Array.isArray(parsed)) {\n        devData = { isNull: false, transactions: parsed };\n      } else {\n        devData = parsed;\n      }\n    }\n  } catch(e) {\n    devData = null;\n  }\n}\n\n// Resilient Fallback Line-by-Line Regex Parser: only run if unparseable, NEVER if explicitly null\nconst isExplicitNull = devData && devData.isNull === true;\nif (!devData || (!isExplicitNull && !devData.transactions && devData.amount === undefined)) {\n  const query = norm.query || '';\n  const lines = query.split(/[\\n,;]+|\\band\\b/i).map(s => s.trim()).filter(Boolean);\n  const fallbackList = [];\n\n  for (const line of lines) {\n    const amtMatch = line.match(/(?:rs\\.?|inr|rupees|₹|\\$)?\\s*(\\d+(?:\\.\\d{1,2})?)/i) || line.match(/(\\d+(?:\\.\\d{1,2})?)\\s*(?:rs\\.?|inr|rupees|₹)?/i);\n    if (amtMatch) {\n      const amt = parseFloat(amtMatch[1]);\n      if (amt > 0) {\n        let item = line\n          .replace(/(?:rs\\.?|inr|rupees|₹|\\$)\\s*\\d+(?:\\.\\d{1,2})?/gi, ' ')\n          .replace(/\\d+(?:\\.\\d{1,2})?\\s*(?:rs\\.?|inr|rupees|₹)?/gi, ' ')\n          .replace(/\\b(?:bought|spent|paid|for|of|on|a|an|the|to)\\b/gi, ' ')\n          .trim()\n          .replace(/\\s+/g, ' ');\n        fallbackList.push({\n          amount: amt,\n          type: 'debit',\n          targetParty: item || 'Unknown',\n          category: 'Shopping'\n        });\n      }\n    }\n  }\n\n  if (fallbackList.length > 1) {\n    devData = { isNull: false, transactions: fallbackList };\n  } else if (fallbackList.length === 1) {\n    devData = {\n      isNull: false,\n      amount: fallbackList[0].amount,\n      type: 'debit',\n      targetParty: fallbackList[0].targetParty,\n      category: 'Shopping'\n    };\n  }\n}\n\nif (!devData) {\n  devData = { isNull: true, amount: 0, targetParty: 'Unknown' };\n}\n\n// 1. Support multi-item transactions array (Bulk list)\nif (devData.transactions && Array.isArray(devData.transactions) && devData.transactions.length > 0) {\n  return devData.transactions.map((tx, idx) => {\n    const amt = parseFloat(tx.amount) || 0;\n    const vendor = (tx.targetParty || tx.vendor || tx.item || 'Unknown').trim();\n    return {\n      json: {\n        ...norm,\n        batchIndex: idx,\n        totalInBatch: devData.transactions.length,\n        isNull: false,\n        hasMissingData: amt === 0,\n        missingFields: amt === 0 ? 'Amount' : '',\n        amount: amt,\n        category: tx.category || 'Shopping',\n        vendor: vendor || 'Unknown',\n        type: ((tx.type || 'debit').toLowerCase() === 'credit' || (tx.type || '').toLowerCase() === 'income') ? 'Income' : 'Expense',\n        medium: tx.medium || 'other',\n        description: tx.description || '',\n        date: tx.date_of_transaction || tx.date || new Date().toISOString().split('T')[0]\n      }\n    };\n  });\n}\n\n// 2. Single transaction flow\nconst amount = parseFloat(devData.amount) || 0;\nconst confidence = (devData.confidence || 'HIGH').toUpperCase();\nlet missingFields = Array.isArray(devData.missing) ? [...devData.missing] : [];\n\nif (confidence === 'LOW') {\n  devData.isNull = true;\n} else if (confidence === 'MEDIUM' && missingFields.length === 0) {\n  missingFields.push('Confirmation needed');\n}\n\nif (amount === 0 && !devData.isNull) missingFields.push('Amount');\nif (!devData.targetParty && !devData.isNull) missingFields.push('Merchant');\n\nconst isTransactionNull = devData.isNull === true || (amount === 0 && !devData.targetParty);\n\nreturn [{\n  json: {\n    ...norm,\n    isNull: isTransactionNull,\n    hasMissingData: missingFields.length > 0 && !isTransactionNull,\n    missingFields: missingFields.join(', '),\n    amount,\n    category: devData.category || 'Other',\n    vendor: devData.targetParty || 'Unknown',\n    type: (devData.type || 'debit').toLowerCase() === 'credit' ? 'Income' : 'Expense',\n    medium: devData.medium || 'other',\n    description: devData.description || '',\n    date: devData.date_of_transaction || new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "4f25c599-4bd9-483d-a593-dece5616dcb9",
+      "name": "Clean & Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isNull == false }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "973bba9d-42f5-470d-9c5e-f5f66ab55f19",
+      "name": "Is Transaction?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasMissingData }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "193fb8ce-d1df-4ddf-a701-f3b44a3a734d",
+      "name": "Is Data Missing?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return { \n  json: { \n    status: 'MISSING_DATA',\n    response: `Missing data: ${$('Clean & Format').item.json.missingFields}. Ask the user to provide it.`,\n    missingFields: $('Clean & Format').item.json.missingFields\n  } \n};"
+      },
+      "id": "b584a804-0d4a-4af4-9fab-8478145d1d2a",
+      "name": "Return Missing Error1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return { \n  json: { \n    status: 'NOT_TRANSACTION',\n    response: 'Message was not a valid financial transaction.'\n  } \n};"
+      },
+      "id": "1858a0f0-11ff-4472-9c09-7755969cdcd8",
+      "name": "Return Null Alert1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst first = items[0]?.json || {};\nconst sheetId = first.sheetId || $('Input Normalizer1').first().json.sheetId;\n\nreturn [{\n  json: {\n    sheetId: sheetId,\n    batchCount: items.length\n  }\n}];"
+      },
+      "id": "3c88789b-0be9-4b25-85cf-a7fd14e5d4ec",
+      "name": "Prepare Dedupe Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "f87ad6c1-77ac-45f4-91f4-143dd68fbb00",
+      "name": "Read Transactions for Dedupe",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1936,
+        1200
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pastRows = $input.all().map(i => i.json);\n\n// Safely retrieve all candidate transactions that passed validation\nlet candidateItems = [];\nconst candidateNodes = ['Is Data Missing?1', 'Clean & Format', 'Clean & Format1'];\nfor (const name of candidateNodes) {\n  try {\n    const nodeItems = $(name).all().map(i => i.json);\n    const validOnes = nodeItems.filter(tx => tx && !tx.isNull && !tx.hasMissingData && parseFloat(tx.amount) > 0);\n    if (validOnes.length > 0) {\n      candidateItems = validOnes;\n      break;\n    }\n  } catch(e) {}\n}\n\nconst validToInsert = [];\nconst duplicateList = [];\n\nfor (const currentTx of candidateItems) {\n  const txDate = new Date(currentTx.date || new Date().toISOString().split('T')[0]);\n  const currentAmt = parseFloat(currentTx.amount);\n  const currentVendorClean = String(currentTx.vendor || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n  const currentRef = String(currentTx.refId || currentTx.eventId || currentTx.orderId || currentTx.upiRef || '');\n  const currentDesc = String(currentTx.description || '').toLowerCase().trim();\n\n  let isDup = false;\n  let dupReason = '';\n  let reviewSignal = null;\n\n  // 1. Check against existing rows from the Google Sheet\n  if (pastRows.length > 0 && pastRows[0] && pastRows[0].amount !== undefined) {\n    for (const pt of pastRows) {\n      if (!pt || pt.amount === undefined || String(pt.type || '').toLowerCase() === 'deleted') continue;\n      const ptAmt = parseFloat(pt.amount);\n      if (isNaN(ptAmt) || ptAmt !== currentAmt) continue;\n\n      const ptVendorClean = String(pt.vendor || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n      const ptDesc = String(pt.description || '').toLowerCase().trim();\n      const ptRef = String(pt.refId || pt.eventId || pt.orderId || pt.upiRef || '');\n\n      // A. Authoritative idempotency check: Match on stable event/ref ID\n      if (currentRef && (ptRef === currentRef || ptDesc.includes(currentRef.toLowerCase()))) {\n        isDup = true;\n        dupReason = `Idempotent duplicate: Ref ID ${currentRef} already logged.`;\n        break;\n      }\n\n      // Safe date comparison guarding against NaN\n      let diffDays = 999;\n      if (pt.date) {\n        const ptDate = new Date(pt.date);\n        if (!isNaN(ptDate.getTime()) && !isNaN(txDate.getTime())) {\n          diffDays = Math.abs((txDate - ptDate) / (1000 * 60 * 60 * 24));\n        }\n      }\n\n      // Exact vendor match on the same calendar day\n      if (diffDays <= 0.5) {\n        const isExactVendor = currentVendorClean === ptVendorClean && currentVendorClean.length > 0;\n        const isFuzzyVendor = (ptVendorClean.includes(currentVendorClean) && currentVendorClean.length >= 3) ||\n                              (currentVendorClean.includes(ptVendorClean) && ptVendorClean.length >= 3);\n\n        if (isExactVendor) {\n          // If description is identical or both lack distinguishing details, mark duplicate\n          if (currentDesc === ptDesc || (!currentDesc && !ptDesc)) {\n            isDup = true;\n            dupReason = `Matches past transaction today: Rs.${pt.amount} at ${pt.vendor}`;\n            break;\n          }\n        } else if (isFuzzyVendor) {\n          // Fuzzy matching is treated as a review signal, NOT a basis for discarding\n          reviewSignal = `Similar vendor (${pt.vendor}) recorded today`;\n        }\n      }\n    }\n  }\n\n  // 2. Intra-batch deduplication (prevent duplicate identical items in same list)\n  if (!isDup) {\n    for (const accepted of validToInsert) {\n      const acceptedAmt = parseFloat(accepted.amount);\n      const acceptedVendorClean = String(accepted.vendor || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n      const acceptedDesc = String(accepted.description || '').toLowerCase().trim();\n\n      if (acceptedAmt === currentAmt && acceptedVendorClean === currentVendorClean && acceptedDesc === currentDesc) {\n        isDup = true;\n        dupReason = `Duplicate item in current batch: Rs.${currentTx.amount} at ${currentTx.vendor}`;\n        break;\n      }\n    }\n  }\n\n  if (isDup) {\n    duplicateList.push({\n      ...currentTx,\n      isDuplicate: true,\n      duplicateReason: dupReason\n    });\n  } else {\n    validToInsert.push({\n      ...currentTx,\n      isDuplicate: false,\n      duplicateReason: '',\n      reviewSignal: reviewSignal\n    });\n  }\n}\n\n// If ALL candidate items were duplicates\nif (validToInsert.length === 0) {\n  const reasons = duplicateList.map(d => `${d.vendor} (Rs.${d.amount}): ${d.duplicateReason}`).join('; ');\n  return [{\n    json: {\n      isDuplicate: true,\n      status: 'SKIPPED_DUPLICATE',\n      duplicateReason: reasons || 'All transactions matched existing entries.',\n      skippedDuplicatesCount: duplicateList.length\n    }\n  }];\n}\n\n// Return clean items for bulk append with standard Transactions columns\nconst skippedSummary = duplicateList.map(d => `${d.vendor} (Rs.${d.amount})`).join(', ');\nreturn validToInsert.map(tx => ({\n  json: {\n    sheetId: tx.sheetId,\n    date: tx.date,\n    amount: tx.amount,\n    vendor: tx.vendor,\n    category: tx.category,\n    type: tx.type,\n    medium: tx.medium || 'other',\n    description: tx.description || '',\n    isDuplicate: false,\n    skippedDuplicatesCount: duplicateList.length,\n    skippedDuplicatesSummary: skippedSummary\n  }\n}));"
+      },
+      "id": "1eb7f612-8a34-463f-846e-8d7f891e9cc7",
+      "name": "Smart Check Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isDuplicate == false }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "1b9966a9-b358-4282-bc17-30517aee8549",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2336,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dup = $input.first().json;\nreturn { \n  json: { \n    status: 'SKIPPED_DUPLICATE',\n    response: `Skipped because it looks like duplicate transaction(s): ${dup.duplicateReason}`,\n    duplicateReason: dup.duplicateReason,\n    skippedCount: dup.skippedDuplicatesCount || 1\n  } \n};"
+      },
+      "id": "fcb6305a-728a-4053-9016-0c2d8cdc7dbe",
+      "name": "Return Duplicate Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "2bef2e69-7e4c-4c60-bc73-7b3d4bdd82ac",
+      "name": "Write Transaction1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2528,
+        1152
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nlet itemStrings = items.map(tx => `Rs.${tx.amount} at ${tx.vendor} (${tx.category})`).join(', ');\n\nconst firstItem = items[0] || {};\nconst skippedCount = firstItem.skippedDuplicatesCount || 0;\nlet skippedNote = '';\nif (skippedCount > 0) {\n  skippedNote = ` (Skipped ${skippedCount} duplicate: ${firstItem.skippedDuplicatesSummary})`;\n}\n\nreturn {\n  json: {\n    status: 'SUCCESS',\n    response: `Successfully logged ${items.length} transaction(s): ${itemStrings}.${skippedNote}. Inform the user cheerfully in one short sentence.`,\n    items: items,\n    totalLogged: items.length,\n    skippedCount: skippedCount\n  }\n};"
+      },
+      "id": "2802bbe5-0c7f-4aef-bfb5-95f8eab61909",
+      "name": "Return Success1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skipLLM === true }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "dev-if-fastpath-skip-llm",
+      "name": "Has Direct Transactions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        1200
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Input Normalizer1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Normalizer1": {
+      "main": [
+        [
+          {
+            "node": "Has Direct Transactions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dev Agent - Classifier1": {
+      "main": [
+        [
+          {
+            "node": "Clean & Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean & Format": {
+      "main": [
+        [
+          {
+            "node": "Is Transaction?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Transaction?1": {
+      "main": [
+        [
+          {
+            "node": "Is Data Missing?1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Null Alert1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Data Missing?1": {
+      "main": [
+        [
+          {
+            "node": "Return Missing Error1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Dedupe Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Dedupe Query": {
+      "main": [
+        [
+          {
+            "node": "Read Transactions for Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Transactions for Dedupe": {
+      "main": [
+        [
+          {
+            "node": "Smart Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Smart Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Write Transaction1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Duplicate Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Transaction1": {
+      "main": [
+        [
+          {
+            "node": "Return Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Direct Transactions?": {
+      "main": [
+        [
+          {
+            "node": "Clean & Format",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dev Agent - Classifier1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "d8fa69da-b78a-4c3e-9a1c-f348292f3cba",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "VJN9AW1OcakFKUmd",
+  "tags": []
+}

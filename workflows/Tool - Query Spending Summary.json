@@ -1,0 +1,96 @@
+{
+  "name": "Tool - Query Spending Summary",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "36068f21-9d57-4bc3-a1be-0b51a32e8382",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        656,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "5359d5c0-0161-42ab-b499-abac97dc493f",
+      "name": "Read Transactions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        864,
+        288
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allTxs = $input.all().map(item => item.json);\n\n// Get the last 30 transactions (to save context window space)\n// and reverse them so the newest are at the top\nconst recentTxs = allTxs.slice(-30).reverse();\n\nif (recentTxs.length === 0) {\n  return { json: { response: \"No past transactions found.\" } };\n}\n\n// Format them into a compact string to send back to the AI\nlet summaryString = \"Here are the user's most recent transactions:\\n\";\nrecentTxs.forEach(tx => {\n  summaryString += `- Date: ${tx.date || 'Unknown'}, Amount: ${tx.amount || 0}, Vendor: ${tx.vendor || 'Unknown'}, Category: ${tx.category || 'Unknown'}\\n`;\n});\n\nreturn { json: { response: summaryString } };"
+      },
+      "id": "0474c334-2e37-40f8-b1cd-a9117a54168e",
+      "name": "Format Recent Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        288
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Transactions": {
+      "main": [
+        [
+          {
+            "node": "Format Recent Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4ca933e1-7c34-4e3e-a600-6e9b7d025ccd",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "VqYRjHwYwf5S1icm",
+  "tags": []
+}

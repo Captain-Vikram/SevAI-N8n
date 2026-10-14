@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+creds.txt
+
+# Sensitive service account keys & certificates
+*service-account*.json
+*sheet-bot*.json
+workflows/telegram-sheet-bot-*.json
+*.pem
+*.key
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & temp files
+*.log

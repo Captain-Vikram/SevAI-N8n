@@ -1,0 +1,225 @@
+{
+  "name": "Tool - Correct Transaction",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a7880c5e-5e7b-4246-8dd3-8e111aaa9d73",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "833c9cfd-06d9-4db9-ae6c-91f7b909d375",
+      "name": "Read Transactions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -96,
+        608
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const trigger = $('Execute Workflow Trigger').first().json || {};\nconst txItems = $input.all();\n\n// 1. Resilient input extraction (supports flat, nested target/newValues, or query wrapper)\nlet queryObj = {};\nif (trigger.query) {\n  if (typeof trigger.query === 'object') {\n    queryObj = trigger.query;\n  } else if (typeof trigger.query === 'string') {\n    try { queryObj = JSON.parse(trigger.query); } catch(e) {}\n  }\n}\n\nconst sheetId = String(trigger.sheetId || queryObj.sheetId || trigger.documentId || queryObj.documentId || '').trim();\nconst action = String(trigger.action || queryObj.action || 'update').toLowerCase().trim();\n\nconst target = (trigger.target && typeof trigger.target === 'object') ? trigger.target : ((queryObj.target && typeof queryObj.target === 'object') ? queryObj.target : {});\nconst newValues = (trigger.newValues && typeof trigger.newValues === 'object') ? trigger.newValues : ((queryObj.newValues && typeof queryObj.newValues === 'object') ? queryObj.newValues : {});\n\nconst findLast = target.findLast === true || trigger.findLast === true || queryObj.findLast === true;\nconst oldAmountRaw = target.oldAmount !== undefined && target.oldAmount !== null \n  ? target.oldAmount \n  : (trigger.oldAmount !== undefined && trigger.oldAmount !== null \n    ? trigger.oldAmount \n    : (queryObj.oldAmount !== undefined ? queryObj.oldAmount : null));\nconst oldAmount = (oldAmountRaw !== null && !isNaN(parseFloat(oldAmountRaw))) ? parseFloat(oldAmountRaw) : null;\n\nconst vendorOrItem = String(\n  target.vendorOrItem || target.vendor || target.item || target.merchant ||\n  trigger.vendorOrItem || trigger.vendor || trigger.item || trigger.merchant ||\n  queryObj.vendorOrItem || queryObj.vendor || queryObj.item || queryObj.merchant || ''\n).trim().toLowerCase();\n\n// 2. Validate sheet data\nif (txItems.length === 0 || !txItems[0].json || txItems[0].json.error) {\n  return { \n    json: { \n      found: false, \n      action: action,\n      sheetId: sheetId,\n      response: \"⚠️ Could not access your Transactions sheet. Please check your Google Sheet connection.\" \n    } \n  };\n}\n\n// 3. Filter active transactions\nconst validRows = txItems\n  .map(item => item.json)\n  .filter(r => r && r.row_number && r.amount !== undefined && String(r.type || '').toLowerCase() !== 'deleted');\n\nif (validRows.length === 0) {\n  return { \n    json: { \n      found: false, \n      action: action,\n      sheetId: sheetId,\n      response: \"Your transaction sheet is currently empty. There are no active transactions to edit or delete.\" \n    } \n  };\n}\n\n// 4. Find matched transaction\nlet matchedRow = null;\n\nif (findLast && !vendorOrItem && oldAmount === null) {\n  matchedRow = validRows[validRows.length - 1];\n} else {\n  const reversed = [...validRows].reverse();\n  for (const row of reversed) {\n    const rawAmt = String(row.amount || '').replace(/[^\\d.]/g, '');\n    const rowAmt = parseFloat(rawAmt) || 0;\n    const rowVendor = String(row.vendor || '').toLowerCase();\n    const rowDesc = String(row.description || '').toLowerCase();\n    const rowCat = String(row.category || '').toLowerCase();\n    \n    const amtMatch = oldAmount !== null ? Math.abs(rowAmt - oldAmount) < 0.05 : false;\n    const textMatch = vendorOrItem ? (rowVendor.includes(vendorOrItem) || rowDesc.includes(vendorOrItem) || rowCat.includes(vendorOrItem) || vendorOrItem.includes(rowVendor)) : false;\n    \n    if (oldAmount !== null && vendorOrItem) {\n      if (amtMatch && textMatch) {\n        matchedRow = row;\n        break;\n      }\n    } else if (oldAmount !== null) {\n      if (amtMatch) {\n        matchedRow = row;\n        break;\n      }\n    } else if (vendorOrItem) {\n      if (textMatch) {\n        matchedRow = row;\n        break;\n      }\n    }\n  }\n  \n  if (!matchedRow && findLast) {\n    matchedRow = validRows[validRows.length - 1];\n  }\n}\n\nif (!matchedRow) {\n  const queryParts = [];\n  if (oldAmount !== null) queryParts.push(`₹${oldAmount}`);\n  if (vendorOrItem) queryParts.push(`\"${vendorOrItem}\"`);\n  const queryStr = queryParts.join(' for ') || 'your specified details';\n  \n  return {\n    json: {\n      found: false,\n      action: action,\n      sheetId: sheetId,\n      response: `Could not find any recent transaction matching ${queryStr}. Please check your transaction history!`\n    }\n  };\n}\n\nconst origAmt = matchedRow.amount;\nconst origVendor = matchedRow.vendor || 'Unknown';\n\nlet finalRow = {};\nlet successMsg = '';\n\nif (action === 'delete' || action === 'remove' || action === 'cancel') {\n  finalRow = {\n    row_number: matchedRow.row_number,\n    date: matchedRow.date || new Date().toISOString().split('T')[0],\n    amount: 0,\n    vendor: `[DELETED] ${origVendor}`,\n    category: matchedRow.category || 'Other',\n    type: 'Deleted',\n    medium: matchedRow.medium || 'other',\n    description: `Deleted on ${new Date().toISOString().split('T')[0]}`\n  };\n  successMsg = `🗑️ Successfully removed transaction for ${origVendor} (₹${origAmt}) from your sheet!`;\n} else {\n  const updatedAmtRaw = newValues.amount !== undefined \n    ? newValues.amount \n    : (trigger.amount !== undefined \n      ? trigger.amount \n      : (queryObj.amount !== undefined \n        ? queryObj.amount \n        : (trigger.newAmount !== undefined ? trigger.newAmount : origAmt)));\n  const updatedAmt = (updatedAmtRaw !== undefined && !isNaN(parseFloat(updatedAmtRaw))) ? parseFloat(updatedAmtRaw) : origAmt;\n  \n  const updatedVendor = newValues.vendor || newValues.vendorOrItem || trigger.newVendor || queryObj.newVendor || origVendor;\n  const updatedCategory = newValues.category || trigger.newCategory || queryObj.newCategory || matchedRow.category || 'Other';\n  const updatedDesc = newValues.description || trigger.description || queryObj.description || matchedRow.description || '';\n  \n  finalRow = {\n    row_number: matchedRow.row_number,\n    date: matchedRow.date || new Date().toISOString().split('T')[0],\n    amount: updatedAmt,\n    vendor: updatedVendor,\n    category: updatedCategory,\n    type: matchedRow.type || 'Expense',\n    medium: matchedRow.medium || 'other',\n    description: updatedDesc\n  };\n  successMsg = `✏️ Successfully updated transaction! Changed ${origVendor} (₹${origAmt}) to ${updatedVendor} (₹${updatedAmt}) under ${updatedCategory}.`;\n}\n\nreturn {\n  json: {\n    found: true,\n    action: action,\n    sheetId: sheetId,\n    row_number: matchedRow.row_number,\n    response: successMsg,\n    ...finalRow\n  }\n};"
+      },
+      "id": "4ff3e247-e7d0-4abf-8899-abf07a7168ee",
+      "name": "Match & Prepare Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.found }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "5bd334b1-ab31-4e36-9157-5e53ef81c0f0",
+      "name": "Is Match Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        336,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d8c36cce-c1d0-4b83-90bf-49c0fcd47d08",
+      "name": "Update Transaction in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        496
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Match & Prepare Change').item.json;\nreturn {\n  json: {\n    status: 'SUCCESS',\n    success: true,\n    action: item.action || 'update',\n    response: item.response || 'Successfully updated transaction in your sheet!'\n  }\n};"
+      },
+      "id": "15bb3d70-598b-40ce-90a3-d8d4e26c5c89",
+      "name": "Format Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nreturn {\n  json: {\n    status: 'NOT_FOUND',\n    success: false,\n    response: item.response || '⚠️ Correction Failed: Could not find any matching active transaction in your sheet.'\n  }\n};"
+      },
+      "id": "c9c8aa66-290e-4fbe-b1a1-c543eeb510e2",
+      "name": "Format Not Found Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        704
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Transactions": {
+      "main": [
+        [
+          {
+            "node": "Match & Prepare Change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match & Prepare Change": {
+      "main": [
+        [
+          {
+            "node": "Is Match Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Match Found?": {
+      "main": [
+        [
+          {
+            "node": "Update Transaction in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Not Found Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Transaction in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "dd380422-d788-46b2-8701-7592059624a3",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "FwaNK3vfqeDnTvlR",
+  "tags": []
+}

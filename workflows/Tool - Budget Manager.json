@@ -1,0 +1,366 @@
+{
+  "name": "Tool - Budget Manager",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "deb09b75-f8ab-405f-9ae6-a548f4929f9b",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Budgets",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "ee435d49-71f1-49d7-977e-2f5af8aff71d",
+      "name": "Read Budgets Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -704,
+        32
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Execute Workflow Trigger').first().json.sheetId || $('Execute Workflow Trigger').first().json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Transactions",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "b4ba6a89-3ea7-473d-af04-eac590980810",
+      "name": "Read Transactions Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -704,
+        224
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Execute Workflow Trigger').first().json || {};\nconst queryObj = triggerData.query || {};\n\n// 1. Resilient parameter extraction\nconst action = (triggerData.action || queryObj.action || 'list').toLowerCase().trim();\nconst sheetId = triggerData.sheetId || queryObj.sheetId || '';\nconst categoryInput = (triggerData.category || queryObj.category || triggerData.name || queryObj.name || '').trim();\nconst monthlyLimitRaw = triggerData.monthlyLimit !== undefined ? triggerData.monthlyLimit : (queryObj.monthlyLimit !== undefined ? queryObj.monthlyLimit : (triggerData.limit || queryObj.limit || triggerData.amount || queryObj.amount));\nconst monthlyLimit = monthlyLimitRaw !== undefined && monthlyLimitRaw !== null ? parseFloat(monthlyLimitRaw) : null;\nconst notesInput = triggerData.notes || queryObj.notes || '';\n\nconst currentMonthStr = new Date().toISOString().substring(0, 7); // e.g. \"2026-10\"\n\n// 2. Fetch Budgets rows safely\nlet budgetRows = [];\ntry {\n  budgetRows = $('Read Budgets Sheet').all().map(r => r.json).filter(b => b && b.category);\n} catch(e) {}\n\nconst firstBudgetItem = $('Read Budgets Sheet').first()?.json || {};\nif (firstBudgetItem.error) {\n  return [{\n    json: {\n      operationType: 'read_only',\n      success: false,\n      status: 'SHEET_TAB_NOT_FOUND',\n      response: \"⚠️ The 'Budgets' tab was not found in your Google Sheet. Please add a tab named 'Budgets' with columns: category, monthlyLimit, currentSpent, remaining, lastAlertLevel, month, updatedAt.\",\n      error: firstBudgetItem.error\n    }\n  }];\n}\n\n// 3. Fetch Transactions rows and calculate actual ledger spending for current month\nlet txRows = [];\ntry {\n  txRows = $('Read Transactions Sheet').all().map(r => r.json).filter(t => t && t.amount !== undefined && t.type !== 'Deleted');\n} catch(e) {}\n\nconst categorySpendMap = {};\nfor (const tx of txRows) {\n  const txDate = tx.date || '';\n  if (!txDate.startsWith(currentMonthStr)) continue; // Only current month transactions\n  \n  const amt = parseFloat(tx.amount) || 0;\n  const type = (tx.type || 'expense').toLowerCase();\n  const cat = (tx.category || 'Other').trim();\n  \n  if (type === 'income') continue; // Exclude income\n  \n  categorySpendMap[cat] = (categorySpendMap[cat] || 0) + amt;\n}\n\n// Normalize category matcher\nfunction findMatchingBudget(catName) {\n  if (!catName) return null;\n  const clean = catName.toLowerCase().replace(/[^a-z0-9]/g, '');\n  return budgetRows.find(b => {\n    const bClean = (b.category || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n    return bClean === clean || bClean.includes(clean) || clean.includes(bClean);\n  });\n}\n\n// 4. Dispatch Actions\n\n// ACTION: SET / CREATE / UPDATE BUDGET\nif (action === 'set' || action === 'create' || action === 'update') {\n  if (!categoryInput) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'MISSING_CATEGORY',\n        response: '⚠️ Please specify a category for the budget (e.g., Food & Dining, Shopping, Travel).'\n      }\n    }];\n  }\n  if (!monthlyLimit || monthlyLimit <= 0) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'INVALID_LIMIT',\n        response: '⚠️ Please specify a valid monthly spending limit greater than 0.'\n      }\n    }];\n  }\n  \n  const existing = findMatchingBudget(categoryInput);\n  const currentSpent = categorySpendMap[categoryInput] || (existing ? (categorySpendMap[existing.category] || 0) : 0);\n  const remaining = Math.max(0, monthlyLimit - currentSpent);\n  const percentage = Math.round((currentSpent / monthlyLimit) * 100);\n  const nowIso = new Date().toISOString();\n  \n  // Determine initial alert level based on existing spend\n  let initialAlert = 0;\n  if (percentage >= 100) initialAlert = 100;\n  else if (percentage >= 85) initialAlert = 85;\n  \n  const budgetPayload = {\n    category: existing ? existing.category : categoryInput,\n    monthlyLimit: monthlyLimit,\n    currentSpent: currentSpent,\n    remaining: remaining,\n    lastAlertLevel: initialAlert,\n    month: currentMonthStr,\n    updatedAt: nowIso\n  };\n  \n  let respMsg = `🎯 Budget Set: \"${budgetPayload.category}\" monthly limit is ₹${monthlyLimit.toLocaleString('en-IN')}.`;\n  respMsg += `\\nCurrent spend this month: ₹${currentSpent.toLocaleString('en-IN')} (${percentage}% used, ₹${remaining.toLocaleString('en-IN')} left).`;\n  \n  if (existing && existing.row_number) {\n    return [{\n      json: {\n        operationType: 'update',\n        sheetId,\n        row_number: existing.row_number,\n        response: respMsg,\n        budget: budgetPayload,\n        ...budgetPayload\n      }\n    }];\n  } else {\n    return [{\n      json: {\n        operationType: 'append',\n        sheetId,\n        response: respMsg,\n        budget: budgetPayload,\n        ...budgetPayload\n      }\n    }];\n  }\n}\n\n// ACTION: CHECK / LIST / GET STATUS\nif (action === 'check' || action === 'list' || action === 'get' || action === 'status') {\n  if (budgetRows.length === 0) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: true,\n        status: 'EMPTY',\n        response: \"You haven't set any category budgets yet. You can set one anytime by saying: 'Set food budget to ₹10,000'!\",\n        budgets: []\n      }\n    }];\n  }\n  \n  let totalBudget = 0;\n  let totalSpentInBudgets = 0;\n  let summaryStr = `📊 Monthly Budget Status (${currentMonthStr}):\\n\\n`;\n  \n  const enrichedBudgets = budgetRows.map(b => {\n    const limit = parseFloat(b.monthlyLimit) || 0;\n    const spent = categorySpendMap[b.category] || 0;\n    const remaining = Math.max(0, limit - spent);\n    const pct = limit > 0 ? Math.round((spent / limit) * 100) : 0;\n    totalBudget += limit;\n    totalSpentInBudgets += spent;\n    \n    let statusIcon = '🟢';\n    if (pct >= 100) statusIcon = '🚨';\n    else if (pct >= 85) statusIcon = '⚠️';\n    \n    summaryStr += `${statusIcon} **${b.category}**: ₹${spent.toLocaleString('en-IN')} / ₹${limit.toLocaleString('en-IN')} (${pct}%)\\n`;\n    summaryStr += `  • Remaining: ₹${remaining.toLocaleString('en-IN')}\\n\\n`;\n    \n    return {\n      ...b,\n      currentSpent: spent,\n      remaining: remaining,\n      percentage: pct\n    };\n  });\n  \n  const overallPct = totalBudget > 0 ? Math.round((totalSpentInBudgets / totalBudget) * 100) : 0;\n  summaryStr += `**Total Budgeted**: ₹${totalSpentInBudgets.toLocaleString('en-IN')} / ₹${totalBudget.toLocaleString('en-IN')} (${overallPct}% used)`;\n  \n  return [{\n    json: {\n      operationType: 'read_only',\n      success: true,\n      status: 'SUCCESS',\n      response: summaryStr.trim(),\n      budgets: enrichedBudgets,\n      totalBudget,\n      totalSpentInBudgets\n    }\n  }];\n}\n\n// ACTION: EVALUATE_SPEND (Check threshold on new transaction)\nif (action === 'evaluate_spend' || action === 'check_transaction') {\n  const matched = findMatchingBudget(categoryInput);\n  if (!matched) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: true,\n        hasBudget: false,\n        alertTriggered: false,\n        alertMessage: null\n      }\n    }];\n  }\n  \n  const limit = parseFloat(matched.monthlyLimit) || 0;\n  const spent = categorySpendMap[matched.category] || 0;\n  const remaining = Math.max(0, limit - spent);\n  const percentage = limit > 0 ? Math.round((spent / limit) * 100) : 0;\n  const priorAlert = parseFloat(matched.lastAlertLevel) || 0;\n  \n  let alertTriggered = false;\n  let newAlertLevel = priorAlert;\n  let alertMsg = null;\n  \n  if (percentage >= 100 && priorAlert < 100) {\n    alertTriggered = true;\n    newAlertLevel = 100;\n    alertMsg = `🚨 BUDGET EXCEEDED: You have reached 100% of your \"${matched.category}\" budget (₹${spent.toLocaleString('en-IN')} / ₹${limit.toLocaleString('en-IN')})! Any further spend will exceed your cap.`;\n  } else if (percentage >= 85 && priorAlert < 85) {\n    alertTriggered = true;\n    newAlertLevel = 85;\n    alertMsg = `⚠️ BUDGET ALERT: You have used ${percentage}% of your \"${matched.category}\" budget (₹${spent.toLocaleString('en-IN')} / ₹${limit.toLocaleString('en-IN')}). Only ₹${remaining.toLocaleString('en-IN')} remaining this month!`;\n  }\n  \n  if (alertTriggered && matched.row_number) {\n    // Persist new alert level so we do not spam repeated alerts\n    const updateRow = {\n      row_number: matched.row_number,\n      category: matched.category,\n      monthlyLimit: limit,\n      currentSpent: spent,\n      remaining: remaining,\n      lastAlertLevel: newAlertLevel,\n      month: currentMonthStr,\n      updatedAt: new Date().toISOString()\n    };\n    return [{\n      json: {\n        operationType: 'update',\n        sheetId,\n        row_number: matched.row_number,\n        alertTriggered: true,\n        alertMessage: alertMsg,\n        percentage: percentage,\n        ...updateRow\n      }\n    }];\n  }\n  \n  return [{\n    json: {\n      operationType: 'read_only',\n      success: true,\n      hasBudget: true,\n      alertTriggered: false,\n      alertMessage: null,\n      percentage: percentage,\n      spent: spent,\n      limit: limit\n    }\n  }];\n}\n\n// ACTION: REMOVE / DELETE\nif (action === 'delete' || action === 'remove') {\n  const matched = findMatchingBudget(categoryInput);\n  if (!matched) {\n    return [{\n      json: {\n        operationType: 'read_only',\n        success: false,\n        status: 'NOT_FOUND',\n        response: `⚠️ No active budget found for \"${categoryInput}\".`\n      }\n    }];\n  }\n  \n  const clearRow = {\n    row_number: matched.row_number,\n    category: matched.category,\n    monthlyLimit: 0,\n    currentSpent: 0,\n    remaining: 0,\n    lastAlertLevel: 0,\n    month: currentMonthStr,\n    updatedAt: new Date().toISOString()\n  };\n  \n  return [{\n    json: {\n      operationType: 'update',\n      sheetId,\n      row_number: matched.row_number,\n      response: `Successfully removed budget for \"${matched.category}\".`,\n      ...clearRow\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    operationType: 'read_only',\n    success: false,\n    status: 'UNKNOWN_ACTION',\n    response: `Unknown action \"${action}\". Supported actions: set, check, evaluate_spend, remove.`\n  }\n}];"
+      },
+      "id": "93a08e5d-3edd-4e95-b75b-cfc4ebe3b9c1",
+      "name": "Process Budget Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "append"
+            }
+          ]
+        }
+      },
+      "id": "31f694db-4cbc-4112-8f32-57dd89111809",
+      "name": "Is Append?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Budgets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "012cd6ef-b4e1-44ac-9e98-b5522be55ec6",
+      "name": "Append Budget to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Budget Request').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'CREATED',\n    action: 'set',\n    response: proc.response,\n    budget: proc.budget\n  }\n};"
+      },
+      "id": "e41d872e-821b-4e6f-ad5e-1b743bafff73",
+      "name": "Format Append Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.operationType }}",
+              "value2": "update"
+            }
+          ]
+        }
+      },
+      "id": "8de3371e-3471-49ee-a45b-947f03cdc93d",
+      "name": "Is Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Budgets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8d4d5863-2725-4fa6-a0ba-f781e6dce0ec",
+      "name": "Update Budget in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        160
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $('Process Budget Request').first().json;\nreturn {\n  json: {\n    success: true,\n    status: 'UPDATED',\n    action: proc.action || 'update',\n    response: proc.response || (proc.alertMessage ? `⚠️ Alert: ${proc.alertMessage}` : 'Budget updated in sheet.'),\n    alertTriggered: proc.alertTriggered || false,\n    alertMessage: proc.alertMessage || null,\n    percentage: proc.percentage || null,\n    budget: proc.budget || null\n  }\n};"
+      },
+      "id": "2005efe6-12a6-4b81-bbb9-592e11e8f8cb",
+      "name": "Format Update Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proc = $input.first().json;\nreturn {\n  json: {\n    success: proc.success !== undefined ? proc.success : true,\n    status: proc.status || 'OK',\n    action: proc.action || 'check',\n    response: proc.response || 'Operation completed.',\n    budgets: proc.budgets || [],\n    alertTriggered: proc.alertTriggered || false,\n    alertMessage: proc.alertMessage || null,\n    error: proc.error || null\n  }\n};"
+      },
+      "id": "8d79f26c-5487-43a2-9e5d-5cfc585c9f4e",
+      "name": "Format Read-Only Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Budgets Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Transactions Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Budgets Sheet": {
+      "main": [
+        [
+          {
+            "node": "Process Budget Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Budget Request": {
+      "main": [
+        [
+          {
+            "node": "Is Append?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Append?": {
+      "main": [
+        [
+          {
+            "node": "Append Budget to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Budget to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Append Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Update?": {
+      "main": [
+        [
+          {
+            "node": "Update Budget in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Read-Only Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Budget in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Format Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "ba0a3f51-9887-45da-a548-57204c94d2f2",
+  "meta": {
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "5AV0fVBYs6dnlsKi",
+  "tags": []
+}

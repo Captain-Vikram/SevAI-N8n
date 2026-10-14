@@ -1,0 +1,22 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - N8N_EDITOR_BASE_URL=https://debtless-creation-goal.ngrok-free.dev/
+      - WEBHOOK_URL=https://debtless-creation-goal.ngrok-free.dev/
+      - NODE_ENV=${NODE_ENV:-production}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
+      - TZ=${TZ:-Asia/Kolkata}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

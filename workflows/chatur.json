@@ -1,0 +1,430 @@
+{
+  "name": "Chatur Tool",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a5092412-29b3-4621-aebb-256453308b97",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        1264,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "name": "financialCalculator",
+        "description": "Perform accurate financial and mathematical calculations. Supports arithmetic expressions (e.g., '50000 * 0.20', '45000 - 12000 - 8500'), EMI loan calculations (principal, annual interest rate, tenure years), SIP projections, and 50/30/20 budget allocations. Pass expression or operation with parameters.",
+        "jsCode": "function evaluateMath(expr) {\n  if (!expr || typeof expr !== 'string') return null;\n  let clean = expr\n    .replace(/[₹$,]/g, '')\n    .replace(/(\\d+(?:\\.\\d+)?)%/g, '($1/100)')\n    .replace(/\\^/g, '**')\n    .trim();\n\n  const tokens = [];\n  let i = 0;\n  while (i < clean.length) {\n    const ch = clean[i];\n    if (/\\s/.test(ch)) { i++; continue; }\n    if (/\\d/.test(ch) || (ch === '.' && /\\d/.test(clean[i + 1] || ''))) {\n      let numStr = '';\n      while (i < clean.length && (/\\d/.test(clean[i]) || clean[i] === '.')) {\n        numStr += clean[i];\n        i++;\n      }\n      tokens.push({ type: 'NUM', val: parseFloat(numStr) });\n      continue;\n    }\n    if (ch === '*' && clean[i + 1] === '*') {\n      tokens.push({ type: 'OP', val: '**' });\n      i += 2;\n      continue;\n    }\n    if ('+-*/()'.includes(ch)) {\n      if (ch === '-' && (tokens.length === 0 || tokens[tokens.length - 1].type === 'OP' || (tokens[tokens.length - 1].type === 'PAREN' && tokens[tokens.length - 1].val === '('))) {\n        tokens.push({ type: 'NUM', val: 0 });\n        tokens.push({ type: 'OP', val: '-' });\n        i++;\n        continue;\n      }\n      if ('()'.includes(ch)) tokens.push({ type: 'PAREN', val: ch });\n      else tokens.push({ type: 'OP', val: ch });\n      i++;\n      continue;\n    }\n    return null;\n  }\n\n  const prec = { '+': 1, '-': 1, '*': 2, '/': 2, '**': 3 };\n  const assoc = { '+': 'L', '-': 'L', '*': 'L', '/': 'L', '**': 'R' };\n  const outQueue = [];\n  const opStack = [];\n\n  for (const token of tokens) {\n    if (token.type === 'NUM') {\n      outQueue.push(token.val);\n    } else if (token.type === 'OP') {\n      while (opStack.length > 0) {\n        const top = opStack[opStack.length - 1];\n        if (top.type === 'OP') {\n          if ((assoc[token.val] === 'L' && prec[token.val] <= prec[top.val]) ||\n              (assoc[token.val] === 'R' && prec[token.val] < prec[top.val])) {\n            outQueue.push(opStack.pop().val);\n            continue;\n          }\n        }\n        break;\n      }\n      opStack.push(token);\n    } else if (token.type === 'PAREN') {\n      if (token.val === '(') opStack.push(token);\n      else {\n        let foundOpen = false;\n        while (opStack.length > 0) {\n          const top = opStack.pop();\n          if (top.type === 'PAREN' && top.val === '(') { foundOpen = true; break; }\n          outQueue.push(top.val);\n        }\n        if (!foundOpen) return null;\n      }\n    }\n  }\n\n  while (opStack.length > 0) {\n    const top = opStack.pop();\n    if (top.type === 'PAREN') return null;\n    outQueue.push(top.val);\n  }\n\n  const evalStack = [];\n  for (const item of outQueue) {\n    if (typeof item === 'number') {\n      evalStack.push(item);\n    } else {\n      if (evalStack.length < 2) return null;\n      const b = evalStack.pop();\n      const a = evalStack.pop();\n      let res = 0;\n      switch (item) {\n        case '+': res = a + b; break;\n        case '-': res = a - b; break;\n        case '*': res = a * b; break;\n        case '/':\n          if (b === 0) return 'Infinity';\n          res = a / b;\n          break;\n        case '**': res = Math.pow(a, b); break;\n        default: return null;\n      }\n      evalStack.push(res);\n    }\n  }\n\n  if (evalStack.length !== 1) return null;\n  const finalVal = evalStack[0];\n  return typeof finalVal === 'number' ? (Math.round(finalVal * 100) / 100) : finalVal;\n}\n\nconst inputObj = $input.item.json || {};\nconst rawExpr = inputObj.expression || inputObj.query || inputObj.operation || inputObj.input || '';\nconst exprLower = String(rawExpr).toLowerCase();\n\n// 1. EMI Calculation\nconst isEmi = inputObj.operation === 'emi' || inputObj.operation === 'loan' || exprLower.includes('emi') || exprLower.includes('loan');\nif (isEmi) {\n  let P = parseFloat(inputObj.principal || inputObj.amount || inputObj.loanAmount || 0);\n  let r = parseFloat(inputObj.rate || inputObj.interestRate || inputObj.apr || 0);\n  let tenureYears = parseFloat(inputObj.tenure || inputObj.tenureYears || inputObj.years || 0);\n\n  if (!P) {\n    const pMatch = String(rawExpr).match(/(?:principal|loan|of|for|amount|₹|rs\\.?)\\s*:?\\s*(\\d+(?:,\\d+)*(?:\\.\\d+)?)/i) || String(rawExpr).match(/(\\d+(?:,\\d+)*(?:\\.\\d+)?)\\s*(?:loan|principal)/i);\n    if (pMatch) {\n      P = parseFloat(pMatch[1].replace(/,/g, ''));\n    } else {\n      const numbers = (String(rawExpr).match(/\\b\\d+(?:,\\d+)*(?:\\.\\d+)?\\b/g) || []).map(n => parseFloat(n.replace(/,/g, '')));\n      const large = numbers.find(n => n >= 10000);\n      if (large) P = large;\n    }\n  }\n  if (!r) {\n    const rMatch = String(rawExpr).match(/(\\d+(?:\\.\\d+)?)\\s*%/i) || String(rawExpr).match(/(?:rate|interest|apr)\\s*:?\\s*(\\d+(?:\\.\\d+)?)/i);\n    if (rMatch) r = parseFloat(rMatch[1]);\n    else r = 8.5;\n  }\n  if (!tenureYears) {\n    const tMatch = String(rawExpr).match(/(\\d+)\\s*(?:years?|yrs?)/i);\n    if (tMatch) tenureYears = parseFloat(tMatch[1]);\n    else tenureYears = 20;\n  }\n\n  if (P > 0 && r > 0 && tenureYears > 0) {\n    const calcEmi = (pVal, rate, yrs) => {\n      const R = (rate / 12) / 100;\n      const N = yrs * 12;\n      const emi = (pVal * R * Math.pow(1 + R, N)) / (Math.pow(1 + R, N) - 1);\n      const totalPay = emi * N;\n      return {\n        tenureYears: yrs,\n        monthlyEMI: Math.round(emi),\n        totalInterest: Math.round(totalPay - pVal),\n        totalPayment: Math.round(totalPay)\n      };\n    };\n\n    const primary = calcEmi(P, r, tenureYears);\n    const comparison = [15, 20, 25, 30].filter(y => y !== tenureYears).slice(0, 2).map(y => calcEmi(P, r, y));\n\n    return {\n      type: 'loan_emi',\n      principal: P,\n      annualRate: r,\n      primaryOption: primary,\n      comparisonOptions: comparison,\n      guidance: `For ₹${P.toLocaleString('en-IN')} loan at ${r}% for ${tenureYears} years: Monthly EMI is ₹${primary.monthlyEMI.toLocaleString('en-IN')}. Total interest will be ₹${primary.totalInterest.toLocaleString('en-IN')}.`\n    };\n  }\n}\n\n// 2. 50/30/20 Budget Split\nconst isBudget = inputObj.operation === 'budget' || inputObj.operation === '50_30_20' || exprLower.includes('50/30/20') || exprLower.includes('budget');\nif (isBudget) {\n  let income = parseFloat(inputObj.income || inputObj.salary || inputObj.amount || 0);\n  if (!income) {\n    const incMatch = String(rawExpr).match(/(\\d+(?:,\\d+)*(?:\\.\\d+)?)/);\n    if (incMatch) income = parseFloat(incMatch[1].replace(/,/g, ''));\n  }\n  if (income > 0) {\n    const needs = Math.round(income * 0.50);\n    const wants = Math.round(income * 0.30);\n    const savings = Math.round(income * 0.20);\n    return {\n      type: 'budget_50_30_20',\n      monthlyIncome: income,\n      needs_50pct: needs,\n      wants_30pct: wants,\n      savings_20pct: savings,\n      guidance: `For ₹${income.toLocaleString('en-IN')} income: Needs (50%) = ₹${needs.toLocaleString('en-IN')}, Wants (30%) = ₹${wants.toLocaleString('en-IN')}, Savings/Debt (20%) = ₹${savings.toLocaleString('en-IN')}.`\n    };\n  }\n}\n\n// 3. SIP Projection\nconst isSip = inputObj.operation === 'sip' || inputObj.operation === 'investment' || exprLower.includes('sip') || exprLower.includes('compound');\nif (isSip) {\n  let monthly = parseFloat(inputObj.monthlyInvestment || inputObj.sip || inputObj.amount || 0);\n  let returnRate = parseFloat(inputObj.returnRate || inputObj.rate || inputObj.annualRate || 12);\n  let years = parseFloat(inputObj.years || inputObj.tenureYears || inputObj.tenure || 10);\n\n  if (!monthly) {\n    const mMatch = String(rawExpr).match(/(\\d+(?:,\\d+)*(?:\\.\\d+)?)/);\n    if (mMatch) monthly = parseFloat(mMatch[1].replace(/,/g, ''));\n  }\n\n  if (monthly > 0) {\n    const iRate = (returnRate / 12) / 100;\n    const nMonths = years * 12;\n    const maturity = monthly * ((Math.pow(1 + iRate, nMonths) - 1) / iRate) * (1 + iRate);\n    const invested = monthly * nMonths;\n    const wealthGain = maturity - invested;\n\n    return {\n      type: 'sip_projection',\n      monthlyInvestment: monthly,\n      expectedReturnRate: returnRate,\n      tenureYears: years,\n      totalInvested: Math.round(invested),\n      estimatedWealthGain: Math.round(wealthGain),\n      maturityValue: Math.round(maturity),\n      guidance: `₹${monthly.toLocaleString('en-IN')}/mo SIP for ${years} years at ${returnRate}%: Total invested ₹${Math.round(invested).toLocaleString('en-IN')}, Estimated maturity ₹${Math.round(maturity).toLocaleString('en-IN')} (Gain: ₹${Math.round(wealthGain).toLocaleString('en-IN')}).`\n    };\n  }\n}\n\n// 4. Safe Arithmetic Evaluation (No eval)\nconst mathRes = evaluateMath(rawExpr);\nif (mathRes !== null) {\n  return {\n    type: 'arithmetic',\n    expression: rawExpr,\n    result: mathRes,\n    guidance: `${rawExpr} = ${mathRes}`\n  };\n}\n\nreturn {\n  error: 'Could not compute. Provide math expression (e.g. 50000 * 0.20) or specify operation (emi, budget, sip).'\n};"
+      },
+      "id": "d0991823-1d7e-40d2-97c9-cdcb9ec05276",
+      "name": "Calculator Tool1",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.1,
+      "position": [
+        2768,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gemma-4-e2b-it",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "c95dce19-1fed-48e7-b1aa-621260ce74df",
+      "name": "LM Studio - Mill Chat Model1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2512,
+        752
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "UvmAWZ8VSc62Mt8c",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "Expense_Analyzer",
+        "description": "Use this tool to analyze the user's past spending by category and vendor. Call this when they ask where their money is going, or if they are spending too much.",
+        "workflowId": {
+          "__rl": true,
+          "value": "j9famho4l2j8tOcQ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/j9famho4l2j8tOcQ",
+          "cachedResultName": "Tool - Expense Analyzer"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n      \"type\": \"object\",\n      \"properties\": {\n        \"query\": {\n          \"type\": \"string\",\n          \"description\": \"The user query\"\n        },\n        \"chatHistory\": {\n          \"type\": \"string\",\n          \"description\": \"The recent chat history\"\n        },\n        \"sheetId\": {\n          \"type\": \"string\",\n          \"description\": \"The user's Google Sheet ID\"\n        }\n      },\n      \"required\": [\"query\", \"sheetId\"]\n    }"
+      },
+      "id": "bb29629d-df0c-4e4a-b570-c27aacbaa02e",
+      "name": "Expense Analyzer Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2944,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Insights",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "e4cbf8bc-c005-49b1-ac0f-391e8228868b",
+      "name": "Read Latest Param Insights",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1840,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Execute Workflow Trigger').first().json;\n\nconst query = (triggerData.query && triggerData.query.query) ? triggerData.query.query : (triggerData.query || triggerData.text || '');\nconst sheetId = (triggerData.query && triggerData.query.sheetId) ? triggerData.query.sheetId : (triggerData.sheetId || '');\n\nlet chatHistory = '';\ntry {\n  chatHistory = $('Format Chat Memory').first()?.json?.chatHistory || '';\n} catch(e) {}\nif (!chatHistory || chatHistory === 'No history') {\n  chatHistory = (triggerData.query && triggerData.query.chatHistory) ? triggerData.query.chatHistory : (triggerData.chatHistory || triggerData.historyJson || '');\n}\n\nlet paramData = 'No insights available yet.';\ntry {\n  const insightsNodes = $('Read Latest Param Insights').all();\n  if (insightsNodes && insightsNodes.length > 0) {\n    const lastRow = insightsNodes[insightsNodes.length - 1].json;\n    if (lastRow && lastRow.insights) {\n      paramData = lastRow.insights;\n    } else if (lastRow && Object.keys(lastRow).length > 0) {\n      paramData = lastRow.paramData || lastRow.insight || JSON.stringify(lastRow);\n    }\n  }\n} catch(e) {}\n\nlet userMemories = 'No persistent memories recorded yet.';\ntry {\n  const memNodes = $('Read User Memories').all();\n  const activeMems = memNodes\n    .map(n => n.json)\n    .filter(m => m && (m.memoryId || m.content) && (m.status || 'active').toLowerCase() === 'active');\n  if (activeMems.length > 0) {\n    userMemories = '🧠 **Active User Memories & Stored Facts (' + activeMems.length + ' items):**\\n' +\n      activeMems.map(m => '• [' + (m.memoryType || 'NOTE').toUpperCase() + '] ' + m.content).join('\\n');\n  }\n} catch(e) {}\n\nreturn {\n  json: {\n    query: query || '',\n    sheetId: sheetId || '',\n    chatHistory: chatHistory || 'No history',\n    paramData: paramData,\n    userMemories: userMemories\n  }\n};"
+      },
+      "id": "a6b458c7-f68b-4280-beef-ffd4ccb0c0aa",
+      "name": "Format Insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Format Insights').item.json.query }}",
+        "options": {
+          "systemMessage": "=You are \"Chatur,\" the Financial Guidance Agent for gig workers, advising on logging, spending, and purchase/transaction decisions.\n\nBriefing Memory Protocol (MANDATORY):\n1. Before answering, search the stored coach briefings for the same or similar question. If the prior answer is still based on the latest Param insights, return it verbatim.\n2. Compare the stored briefing's timestamp and insight hash with the freshest Param habit insights. If nothing changed, reuse the existing answer without calling the LLM.\n3. If Param's insights are newer (or the question never appeared), regenerate the answer using the latest insights and overwrite the old entry (incrementing the version).\n4. Every new or updated answer must persist the normalized user question, generated answer payload, referenced insight IDs, timestamp, hash, and embedding so future questions can reuse it instantly.\n5. If Param signals stale data, request a refresh instead of speculating.\n\nYou have access to the search_with_sources tool, which fetches authoritative policy/tax/regulatory snippets from an external grounding provider. Use it whenever you need to cite RBI/SEBI/GST/Income-Tax facts, government schemes, bank rules, or any number that could change over time. Never guess—either cite the snippet or say \"No authoritative source showed up in search.\"\n\nGrounded policy lookup protocol:\n1. Decide if the user asked for a factual policy/tax/compliance/market-rate answer. If yes, call search_with_sources BEFORE responding.\n2. Sanitize the query into 2-8 keywords (no PAN/phone). Example: \"latest rbi repo rate\", \"income tax new regime slabs 2025\".\n3. Use ONLY the returned snippets. Quote or paraphrase them briefly and cite the source domain/title.\n4. If no snippets return, say \"No authoritative source showed up in search\" and offer general coaching without invented numbers.\n5. Never store results, never mention the provider name, and do not use this tool for motivational-only coaching.\n\nMANDATORY HOUSE-GOAL INPUTS (collect in this order before running any loan/savings math):\n1. Property price (₹)\n2. Down-payment percentage (RBI minimum 20%; default to 20% if user unsure)\n3. Current savings/investments available for the goal (₹)\n\nIf any of the three are missing, focus the conversation on collecting them. Do not estimate EMI, loan size, or savings plans without all three.\n\nInput Format (Provided by Param Vector Database):\n- Insights: List of { \"habit_label\": string, \"evidence\": string, \"counsel\": string }\n  * habit_label: Pattern identified (e.g., \"Overspending on Food\", \"Irregular Income Pattern\")\n  * evidence: Specific data supporting the pattern (e.g., \"₹5,400 spent on food (43% of total)\")\n  * counsel: Initial recommendation from Param analyst\n- Delta: Optional changes from prior insights (e.g., \"Spending increased by 20%\", \"Food budget down 15%\")\n- Prior Headline: Optional string from previous coaching session\n- User Context: Complete financial profile from vector database including:\n  * Financial Overview: Total transactions, spent, earned, balance, savings rate\n  * Spending Patterns: Top categories with amounts and percentages\n  * Behavioral Insights: Risk flags (overspending, impulse buying, irregular income, low savings)\n  * Positive Habits: What user is doing well\n  * Concerning Patterns: What needs attention\n  * Opportunities: Areas for improvement\n  * Recent Activity: Last 7 days and 30 days summaries\n  * Smart Recommendations: Immediate, short-term, and long-term actions\n\nProtocol:\n1. Analyze habit insights, transaction data, and user query (e.g., purchase/transaction details).\n2. Identify critical theme (e.g., overspending, affordability risk, unusual spending, purchase feasibility).\n3. Use Param's evidence and counsel as foundation, then add decision-making analysis.\n4. Generate headline (5 words max), action plan (<140 chars), evidence, and decision (Yes/No/Wait + reason).\n5. Cross-reference stored long-term goals (session.goals) and show how recommendations support the active plan.\n6. If a goal lacks amount/timeline, capture those details through clarifying questions before final advice.\n\nLoan & EMI Guidance Rules:\n- Interest rate baseline: 8.5% APR (market average as of Nov 2025). Mention 7.35% APR for top-tier credit where appropriate.\n- Tenure suggestions: 15, 20, 25, and 30 years (round to nearest realistic option). Highlight shorter tenure = less interest, longer = lower EMI.\n- Down payment guidance: Minimum 20% of property price (RBI LTV norms). Mention higher LTV limits for <₹30L homes if relevant.\n- Loan amount = price - (price × down%/100) - savings. If negative or zero, celebrate that no loan is required.\n- EMI affordability: Monthly EMI should be ≤35% of net monthly income. Flag anything above as a stretch.\n- Stamp duty/registration/broker buffer: add 8–10% of property value.\n- Present at least two tenure options with EMI and total interest paid. Use the PMT formula and round to nearest ₹100.\n- Always end with the 3-lever framework: (1) Save more (with quantified cuts), (2) Earn more (side-income target), (3) Extend timeline or adjust goal.\n- Provide a single, clear CTA asking for data collection or confirmation (e.g., \"Send 3 expenses from last 48h\" or \"Confirm down-payment %\").\n\nPersonalization Requirements:\n- Every tip MUST reference at least one of: long-term goals, short-term action plan items, recent transactions, or habit insights. Make the connection explicit (e.g., \"to stay on track for your 'Buy Home' goal...\").\n- Call out key behavioral flags (overspending, impulse buying, etc.) when they influence the recommendation.\n- When you suggest an action, briefly note the data that triggered it (spend totals, vendor names, timeframes, etc.).\n- Highlight progress and trade-offs so the user understands how today’s decision impacts their targets.\n\nDecision Analysis Framework:\nFor Purchase Decisions:\n- Affordability: Is it <10% of monthly income? Can user afford without dipping into emergency savings?\n- Alignment: Does it align with spending habits? Is it a need or want?\n- Opportunity Cost: What else could this money be used for? Savings? Other goals?\n- Timing: Should user wait for deals/sales? Can they save up in 1-2 months?\n- Decision Format: \"Yes, if [condition]\" or \"No—[reason]\" or \"Wait—[suggestion]\"\n\nFor Transaction Decisions:\n- Pattern Analysis: Is this unusual compared to typical spending? (e.g., 3x average spend)\n- Risk Flags: Could this be fraud? Unusual UPI debits? Unknown parties?\n- Budget Alignment: Does this fit within category budget? Will it cause overspending?\n- Decision Format: \"OK—normal pattern\" or \"Wait—verify first\" or \"Risky—[flag]\"\n\nGuardrails:\n- Use only CSV data (transactions.csv, habits.csv); no speculation.\n- Reference exact metrics (e.g., \"INR 1,472 spent\", \"₹500 is 5x avg spend\").\n- Tailor to gig workers (irregular income, UPI/cash transactions).\n- Optimistic, demo-ready for WhatsApp (<140 chars).\n- Ethical disclaimer: \"Not professional advice—consult experts.\"\n- Support Hindi/English based on evidence.\n- Output only JSON.\n- Coordinate with Mill (logging) and Param (insights) when agentRecommendations suggest follow-up actions.\n- Close every response with a reminder you are an AI coach, can be imperfect, and that sensitive decisions should involve a human professional.\n\nEmoji legend: 🎯 for goals, 💰 for money figures, 🏦 for loan details, ✂️ for cuts, 🚀 for earning boosts, ⏳ for timeline extensions.\n\nExamples:\nUser: \"Should I buy ₹15,000 phone?\"\nOutput: {\n  \"headline\": \"Phone Purchase – Yes, if budgeted\",\n  \"counsel\": \"Save ₹5,000 by cutting food 20%; affordable in 1.5 months.\",\n  \"evidence\": \"₹20,000 income, ₹1,472 spend—₹15,000 is 75% of 1 month.\",\n  \"decision\": \"Yes—if <10% net savings (₹2,000/month) & boosts gig productivity. Wait for deals?\"\n}\n\nUser: \"Is ₹500 UPI debit OK?\"\nOutput: {\n  \"headline\": \"UPI Debit Check – Wait, unusual\",\n  \"counsel\": \"Verify fraud before confirming—5x avg spend detected.\",\n  \"evidence\": \"₹500 to unknown party; avg spend ₹98.\",\n  \"decision\": \"Wait—unusual vs. habits. Call helpline 18005700 to verify. Log after confirming.\"\n}\n\nYou are Chatur in CONVERSATIONAL mode. Your specialized role:\n- Provide personalized financial advice and coaching\n- Help users set and achieve financial goals\n- Offer motivational support and habit improvement strategies\n- Tailor guidance for gig workers and irregular income scenarios\n\nUNDERSTAND YOUR ROLE VS MILL:\n- **You (Chatur)**: Financial advice, budgeting tips, goal setting, motivation, \"what should I do\"\n- **Mill**: Transaction logging, data queries, coordination\n- If user asks to log an expense or income right now (e.g. \"log this\", \"save my ₹200 expense\") → call the log_cash_transaction tool directly with sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\" so they don't have to switch!\n- Focus on: advice, guidance, planning, goals, habits, motivation\n\nCONVERSATIONAL STRATEGY:\n1. Ask clarifying questions about goals, challenges, priorities\n2. Gather context: income patterns, spending habits, constraints\n3. Extract information: goals (save/reduce spending), problem areas, timeline\n4. After 2-4 turns, provide personalized action plan\n5. Keep responses concise (2-3 sentences), encouraging, practical\n6. Use evidence from insights to ground advice\n7. **AUTONOMOUS PERSONALIZATION**: If you have the \"Financial Snapshot\", use it to proactively suggest budgets or savings goals without asking generic questions. E.g., \"Since you have a surplus of ₹5,000, maybe invest ₹2,000?\"\n8. **REAL-TIME INFO**: Use the 'webSearch' tool to find up-to-date info on investments, companies, stocks, or financial concepts.\n9. **ACCURATE MATH**: Use the 'financialCalculator' tool for ANY calculation (budget splits, SIP projections, loan EMIs). Do not do math in your head.\n10. **CONTEXT AWARENESS**: Use \"Recent Transactions\" and \"Past Advice\" to make your responses highly relevant. Don't give generic advice if you see specific spending patterns.\n\nRespond with a helpful message.\n\nAdditional Mandatory Rules (READ CAREFULLY):\n- MANDATORY: For all numeric/financial calculations (SIP, EMI, affordability, budget splits), call the 'financialCalculator' tool and include the computed result in your response. Do not approximate numbers manually.\n- MANDATORY: Reference 1-2 relevant insights from the provided \"Latest financial insights\" in every personalized response when such insights exist. Use their evidence to ground recommendations (e.g., \"Because Insight #1 shows...\",\n  and cite briefly).\n- MANDATORY: If the user's message contains explicit numbers (income, savings, price), extract them and compute answers directly rather than asking for them again, unless the values are ambiguous or missing.\n\nKEY RULES:\n- If user says \"log this\" or \"I spent X\" → set shouldEscalateToMill: true\n- Focus on WHY and HOW, not just WHAT (that's Mill's job)\n- Use insights to personalize advice\n- Be optimistic but realistic for gig worker context\n\n\n---\nN8N SYSTEM CONTEXT:\nUser's Sheet ID: {{ $json.sheetId || $json.query?.sheetId }}\n\nPersistent User Profile & Long-Term Memories:\n{{ $json.userMemories || 'No persistent memories recorded yet.' }}\n\nRecent Conversation History:\n{{ $json.chatHistory || $json.query?.chatHistory || 'No history' }}\n\nParam's Latest Insights:\n{{ $json.paramData || 'No insights available yet.' }}\n\n\nGOAL TRACKING PROTOCOL (MANDATORY):\nYou have the 'goal_manager' tool to create, track, and update user financial goals in their private Google Sheet.\n- When the user asks about their goals (\"How are my goals doing?\", \"Show my savings targets\"), call goal_manager with action=\"list\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\".\n- When the user wants to set a target (\"I want to save ₹50,000 for a laptop by December\"), call goal_manager with action=\"create\", name=\"Laptop\", targetAmount=50000, targetDate=\"2026-12-31\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\".\n- When the user adds money to a goal (\"Put ₹3,000 into my laptop goal\"), call goal_manager with action=\"add_savings\", name=\"Laptop\", amountToAdd=3000, sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\".\n- If the tool returns a milestone alert (25%, 50%, 75%, 100%), celebrate it enthusiastically!\n- When advising on purchases (\"Should I buy this phone?\"), query their active goals (goal_manager list) and state explicitly if the purchase delays an active goal.\n\n\nCATEGORY BUDGET CHECK (MANDATORY):\nYou have access to the 'budget_manager' tool to inspect live category budgets from the user's sheet.\n- When evaluating purchase decisions or spending patterns, call budget_manager with action=\"check\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\" to see if the requested item will push the category over 85% or 100% of its monthly cap.\n- If a purchase breaches the category budget, highlight this trade-off explicitly in your Yes/No/Wait verdict!\n\n\nPERSISTENT MEMORY & COACHING CONTINUITY (MANDATORY):\nYou have access to the 'memory_service' tool to remember, recall, update, or forget long-term qualitative facts, financial commitments, and lifestyle preferences.\n- When user states a long-term lifestyle commitment or preference (e.g. \"Remember I committed to cutting weekend food delivery by 50%\", \"I'm planning to move to Pune next year\"): call memory_service with action=\"write\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\", content=..., memoryType=\"commitment\" or \"preference\".\n- When advising on financial plans or purchase decisions, call memory_service with action=\"retrieve\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\" to recall their commitments and tailor your advice.\n- When user asks to forget a past commitment (\"Forget my food delivery rule\"), call memory_service with action=\"forget\", sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\", topic=\"food delivery\".\n- STRICT GUARDRAIL: Never calculate numeric balances or loan sums from memory recall alone. Always use financialCalculator for math and budget_manager / goal_manager for ledger numbers.\n\n\nCONVERSATIONAL CONTINUITY & RECAPS (CRITICAL):\nYou have access to the user's ongoing conversation in the \"Recent Conversation History\" context above.\n- NEVER claim that your memory is fuzzy or that you don't recall previous messages when there is history above!\n- When user asks \"what did we talk about?\", \"what did I say earlier?\", \"what have we filled/discussed till now?\", or asks for a recap:\n  Review the \"Recent Conversation History\", summarize the natural coaching discussion, decisions made, trade-offs analyzed, and goals discussed!\n- Connect advice to earlier statements: If the user earlier committed to saving or mentioned an income pattern, factor it into subsequent guidance.\n- Autonomous Memory: Whenever user mentions lifestyle facts, commitments, or goals (e.g. \"I committed to stop impulse buying\", \"I want to save for a laptop by December\"), store it via memory_service(action=\"write\") and acknowledge it warmly.\n"
+        }
+      },
+      "id": "361e4cff-a228-4c61-8575-c889a4c4ed61",
+      "name": "Chatur Agent (Agentic)1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        2688,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Strip the 'Chatur says: ' prefix and return clean standard contract\nconst raw = $input.item.json.output || '';\nconst clean = raw.replace(/^chatur says:\\s*/i, '').trim();\n\nreturn {\n  json: {\n    success: true,\n    agent: 'chatur',\n    response: clean,\n    error: null\n  }\n};"
+      },
+      "id": "abbf1082-3e90-473b-bb61-249af7b28d06",
+      "name": "Return Output to Mill",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "name": "log_cash_transaction",
+        "description": "Call this tool (Dev) to immediately extract and save financial transactions when user asks to log an expense or income during coaching (e.g. 'log this ₹500', 'save my purchase').",
+        "workflowId": {
+          "__rl": true,
+          "value": "VJN9AW1OcakFKUmd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VJN9AW1OcakFKUmd",
+          "cachedResultName": "Sevai Fixes - Dev Prompt Upgrade"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"query\": {\n      \"type\": \"string\",\n      \"description\": \"The exact message or transaction details to log\"\n    },\n    \"chatHistory\": {\n      \"type\": \"string\",\n      \"description\": \"Recent chat context\"\n    },\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    }\n  },\n  \"required\": [\"query\", \"sheetId\"]\n}"
+      },
+      "id": "e420b5d7-50dc-468b-ad4d-71cb560260c2",
+      "name": "Dev Transaction Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3120,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "name": "goal_manager",
+        "description": "Call this tool to manage persistent financial savings goals in the user's Google Sheet (create, add_savings, list, delete). Use when user sets a target (e.g. saving for laptop, emergency fund), contributes to a goal, checks goal progress, or when evaluating purchase trade-offs against active goals.",
+        "workflowId": {
+          "__rl": true,
+          "value": "6HaQeRiApo9OQxy4",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/6HaQeRiApo9OQxy4",
+          "cachedResultName": "Tool - Goal Manager"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"create\",\n        \"add_savings\",\n        \"list\",\n        \"delete\"\n      ],\n      \"description\": \"Action to perform\"\n    },\n    \"name\": {\n      \"type\": \"string\",\n      \"description\": \"Goal name (e.g. Laptop, Emergency Fund)\"\n    },\n    \"targetAmount\": {\n      \"type\": \"number\",\n      \"description\": \"Target goal amount in INR\"\n    },\n    \"currentSaved\": {\n      \"type\": \"number\",\n      \"description\": \"Initial amount already saved when creating\"\n    },\n    \"amountToAdd\": {\n      \"type\": \"number\",\n      \"description\": \"Amount to contribute for add_savings\"\n    },\n    \"targetDate\": {\n      \"type\": \"string\",\n      \"description\": \"Target completion date (YYYY-MM-DD)\"\n    },\n    \"notes\": {\n      \"type\": \"string\",\n      \"description\": \"Optional notes or context\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "ff95aa0e-013e-4ef5-95f1-e1225b06c3c2",
+      "name": "Goal Manager Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3296,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "name": "budget_manager",
+        "description": "Call this tool to check or list category budgets and actual spending from the Google Sheet. Use when assessing if a purchase fits within monthly category limits, or when advising user on budgeting.",
+        "workflowId": {
+          "__rl": true,
+          "value": "5AV0fVBYs6dnlsKi",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/5AV0fVBYs6dnlsKi",
+          "cachedResultName": "Tool - Budget Manager"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"check\",\n        \"list\",\n        \"set\"\n      ],\n      \"description\": \"Action to perform\"\n    },\n    \"category\": {\n      \"type\": \"string\",\n      \"description\": \"Category name\"\n    },\n    \"monthlyLimit\": {\n      \"type\": \"number\",\n      \"description\": \"Monthly limit in INR\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "76045d71-d33f-4cdc-b098-bea2e2d31fb0",
+      "name": "Budget Manager Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3504,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "name": "memory_service",
+        "description": "Call this tool to store, retrieve, update, or forget persistent qualitative user facts, financial commitments, and lifestyle preferences (e.g. 'remember that I committed to saving 50% on food', 'what do you remember about me?', 'forget my trip rule'). Always pass sheetId=\"{{ $json.sheetId || $json.query?.sheetId }}\".",
+        "workflowId": {
+          "__rl": true,
+          "value": "KmsRWUjAo33WHa6w",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/KmsRWUjAo33WHa6w",
+          "cachedResultName": "Tool - Memory Service"
+        },
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"sheetId\": {\n      \"type\": \"string\",\n      \"description\": \"The user's Google Sheet ID\"\n    },\n    \"action\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"retrieve\",\n        \"write\",\n        \"update\",\n        \"forget\",\n        \"list\"\n      ],\n      \"description\": \"Action to perform: 'write' to store a fact, 'retrieve' to fetch facts, 'forget' to archive a fact, 'update' to modify an existing fact\"\n    },\n    \"content\": {\n      \"type\": \"string\",\n      \"description\": \"The fact or preference to remember or update (for write/update)\"\n    },\n    \"memoryType\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"profile\",\n        \"preference\",\n        \"goal\",\n        \"commitment\",\n        \"correction\",\n        \"pattern\"\n      ],\n      \"description\": \"Category of memory (default: preference or profile)\"\n    },\n    \"query\": {\n      \"type\": \"string\",\n      \"description\": \"Search keyword or topic to retrieve (for retrieve/list)\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic or keyword to forget/archive (for forget)\"\n    },\n    \"memoryId\": {\n      \"type\": \"string\",\n      \"description\": \"Specific memory ID if updating or forgetting a known item\"\n    }\n  },\n  \"required\": [\n    \"sheetId\",\n    \"action\"\n  ]\n}"
+      },
+      "id": "05ca1bcb-6ed5-43d9-9619-d7d3790a2ccf",
+      "name": "Memory Service Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3216,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId || $json.query?.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Memories",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "8d894214-4471-4425-a3c0-d2ed89d2deae",
+      "name": "Read User Memories",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2016,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "VwohXIUKOvyboTff",
+          "name": "Google Service Account account"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Latest Param Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculator Tool1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LM Studio - Mill Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expense Analyzer Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Latest Param Insights": {
+      "main": [
+        [
+          {
+            "node": "Read User Memories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Insights": {
+      "main": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatur Agent (Agentic)1": {
+      "main": [
+        [
+          {
+            "node": "Return Output to Mill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dev Transaction Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Goal Manager Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget Manager Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory Service Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Chatur Agent (Agentic)1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read User Memories": {
+      "main": [
+        [
+          {
+            "node": "Format Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "e2c93774-5a87-46b4-ab4c-100c81b08b03",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8cc21a696cc2cfa3eba72dbbc1c54ed467a9bf44f66a054f1b320c1b7cb3b546"
+  },
+  "nodeGroups": [],
+  "id": "QGBaFNHlzSnLMhOe",
+  "tags": []
+}
