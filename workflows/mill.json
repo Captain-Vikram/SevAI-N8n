@@ -135,7 +135,7 @@
       "typeVersion": 4.5,
       "position": [
         5184,
-        272
+        180
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -274,8 +274,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        5360,
-        272
+        5184,
+        360
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -305,6 +305,21 @@
           "name": "Google Gemini(PaLM) Api account"
         }
       }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "mill-merge-context-parallel",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        5360,
+        272
+      ]
     }
   ],
   "pinData": {},
@@ -314,6 +329,11 @@
         [
           {
             "node": "Read Latest Param Insights1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read User Memories1",
             "type": "main",
             "index": 0
           }
@@ -368,7 +388,7 @@
       "main": [
         [
           {
-            "node": "Read User Memories1",
+            "node": "Merge Context",
             "type": "main",
             "index": 0
           }
@@ -434,9 +454,9 @@
       "main": [
         [
           {
-            "node": "Format Insights1",
+            "node": "Merge Context",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -447,6 +467,17 @@
           {
             "node": "Mill Agent1",
             "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Format Insights1",
+            "type": "main",
             "index": 0
           }
         ]

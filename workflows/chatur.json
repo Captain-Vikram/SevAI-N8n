@@ -94,7 +94,7 @@
       "typeVersion": 4.5,
       "position": [
         1840,
-        512
+        420
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -263,8 +263,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        2016,
-        512
+        1840,
+        600
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -274,6 +274,21 @@
         }
       },
       "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "chatur-merge-context-parallel",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        2016,
+        512
+      ]
     }
   ],
   "pinData": {},
@@ -283,6 +298,11 @@
         [
           {
             "node": "Read Latest Param Insights",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read User Memories",
             "type": "main",
             "index": 0
           }
@@ -326,7 +346,7 @@
       "main": [
         [
           {
-            "node": "Read User Memories",
+            "node": "Merge Context",
             "type": "main",
             "index": 0
           }
@@ -400,6 +420,17 @@
       ]
     },
     "Read User Memories": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
       "main": [
         [
           {
