@@ -168,7 +168,7 @@
     },
     {
       "parameters": {
-        "jsCode": "let text = '';\nlet chatId = $input.item.json.chatId || '';\nlet sheetId = $input.item.json.sheetId || '';\nlet source = $input.item.json.source || '';\nlet firstName = $input.item.json.firstName || 'User';\nlet isBulk = $input.item.json.isBulk || false;\nlet directTransactions = $input.item.json.directTransactions || null;\nlet analytics = $input.item.json.analytics || null;\n\nif (source === 'android_sms_bulk') {\n  text = 'Bulk 1-month SMS sync';\n} else if (source === 'android_sms' || $input.item.json.message || $input.item.json.sms_text) {\n  const msg = $input.item.json.message || $input.item.json.sms_text || '';\n  const sender = $input.item.json.sender || $input.item.json.senderName || 'Bank';\n  text = `SMS from ${sender}: ${msg}`;\n  source = 'android_sms';\n} else {\n  text = $input.item.json.text;\n  source = 'telegram';\n}\n\nreturn {\n  json: {\n    text,\n    chatId,\n    sheetId,\n    source,\n    firstName,\n    sessionId: chatId,\n    isBulk,\n    directTransactions,\n    analytics\n  }\n};"
+        "jsCode": "let text = '';\nlet chatId = $input.item.json.chatId || '';\nlet sheetId = $input.item.json.sheetId || '';\nlet source = $input.item.json.source || '';\nlet firstName = $input.item.json.firstName || 'User';\nlet isBulk = $input.item.json.isBulk || false;\nlet directTransactions = $input.item.json.directTransactions || null;\nlet analytics = $input.item.json.analytics || null;\n\nif (source === 'android_sms_bulk') {\n  text = 'Bulk 1-month SMS sync';\n} else if (source === 'android_sms' || $input.item.json.message || $input.item.json.sms_text) {\n  const msg = $input.item.json.message || $input.item.json.sms_text || '';\n  const sender = $input.item.json.sender || $input.item.json.senderName || 'Bank';\n  text = `SMS from ${sender}: ${msg}`;\n  source = 'android_sms';\n} else {\n  text = $input.item.json.text;\n  source = 'telegram';\n}\n\nconst nowIso = new Date().toISOString();\nreturn {\n  json: {\n    timestamp: nowIso,\n    content: text,\n    status: 'Pending',\n    text,\n    chatId,\n    sheetId,\n    source,\n    firstName,\n    sessionId: chatId,\n    isBulk,\n    directTransactions,\n    analytics\n  }\n};"
       },
       "id": "25be0476-e7e4-44db-819d-98c2f09ee78c",
       "name": "Event Normalizer",
@@ -859,40 +859,20 @@
           "mode": "name"
         },
         "columns": {
-          "mappingMode": "autoMapInputData",
+          "mappingMode": "defineBelow",
           "value": {
-            "timestamp": "={{ new Date().toISOString() }}",
+            "timestamp": "={{ $json.timestamp || new Date().toISOString() }}",
+            "content": "={{ $json.content || $json.text }}",
             "chatId": "={{ $json.chatId }}",
+            "sheetId": "={{ $json.sheetId }}",
             "source": "={{ $json.source }}",
-            "content": "={{ $json.text }}",
-            "status": "Pending",
-            "sheetId": "={{ $json.sheetId }}"
+            "status": "Pending"
           },
           "matchingColumns": [],
           "schema": [
             {
               "id": "timestamp",
               "displayName": "timestamp",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "chatId",
-              "displayName": "chatId",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "source",
-              "displayName": "source",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -911,8 +891,8 @@
               "removed": false
             },
             {
-              "id": "status",
-              "displayName": "status",
+              "id": "chatId",
+              "displayName": "chatId",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -923,6 +903,26 @@
             {
               "id": "sheetId",
               "displayName": "sheetId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
               "required": false,
               "defaultMatch": false,
               "display": true,

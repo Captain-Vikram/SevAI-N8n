@@ -104,7 +104,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return {\n  json: {\n    query: $input.item.json.content,\n    sheetId: $input.item.json.sheetId || $('Read SMS').item.json.sheetId,\n    row_number: $input.item.json.row_number,\n    chatId: $input.item.json.chatId\n  }\n};"
+        "jsCode": "const item = $input.item.json;\nconst smsContent = item.content || item.text || item.message || '';\nconst sId = item.sheetId || $('Read SMS').item?.json?.sheetId || '';\nconst rNum = item.row_number;\nconst cId = item.chatId;\n\nreturn {\n  json: {\n    query: smsContent,\n    text: smsContent,\n    content: smsContent,\n    sheetId: sId,\n    row_number: rNum,\n    chatId: cId\n  }\n};"
       },
       "id": "9221607c-a277-4e7a-8334-46bfbca3bec1",
       "name": "Prepare Dev Input",
