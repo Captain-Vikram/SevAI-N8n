@@ -302,6 +302,32 @@
           "name": "Google Service Account account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [];"
+      },
+      "id": "drop-non-pending-sms-node",
+      "name": "Drop Non-Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn [{\n  json: {\n    success: true,\n    processedCount: items.length,\n    message: `Processed ${items.length} pending SMS message(s).`\n  }\n}];"
+      },
+      "id": "format-sms-processed-output-node",
+      "name": "Format SMS Processed Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2520,
+        -208
+      ]
     }
   ],
   "pinData": {},
@@ -344,6 +370,13 @@
         [
           {
             "node": "Prepare Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drop Non-Pending",
             "type": "main",
             "index": 0
           }
@@ -421,6 +454,17 @@
         [
           {
             "node": "Write Agent Response to Memory1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Agent Response to Memory1": {
+      "main": [
+        [
+          {
+            "node": "Format SMS Processed Output",
             "type": "main",
             "index": 0
           }
